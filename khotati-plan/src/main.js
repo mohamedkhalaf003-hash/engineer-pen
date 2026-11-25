@@ -202,18 +202,33 @@ function nextTxt() {
   return '';
 }
 let cm = (() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() }; })();
+function monthStats(y, m) {
+  const nd = new Date(y, m + 1, 0).getDate(), todayK = iso(new Date()), days = [];
+  for (let n = 1; n <= nd; n++) { const k = iso(new Date(y, m, n)); if (k <= todayK) days.push({ k, n, i: dIdx(parse(k)), p: dayPct(k) }); }
+  const cnt = days.length, avg = cnt ? Math.round(days.reduce((a, x) => a + x.p, 0) / cnt) : 0;
+  const cats = ITEMS.map(it => { let sum = 0, c = 0; days.forEach(x => { if (isNA(it.k, x.i)) return; c++; sum += SC[((S.track[x.k] || {}).s || {})[it.k]] || 0; }); return { ...it, p: c ? Math.round(sum / c) : 0 }; });
+  const tr = days.filter(x => S.track[x.k] && x.p > 0);
+  const best = days.reduce((a, x) => (!a || x.p > a.p ? x : a), null), worst = tr.length ? tr.reduce((a, x) => (x.p < a.p ? x : a), tr[0]) : null;
+  return { nd, cnt, avg, days, cats, tracked: tr.length, hi: days.filter(x => x.p >= 80).length, mid: days.filter(x => x.p >= 50 && x.p < 80).length, lo: days.filter(x => x.p < 50).length, best, worst };
+}
 function vCal() {
   const first = new Date(cm.y, cm.m, 1), nd = new Date(cm.y, cm.m + 1, 0).getDate(), off = dIdx(first), today = iso(new Date());
   let cells = '';
   for (let i = 0; i < off; i++) cells += '<i></i>';
   for (let n = 1; n <= nd; n++) {
-    const dt = new Date(cm.y, cm.m, n), k = iso(dt), has = (S.ev[k] || []).length, tr = S.track[k] && dayPct(k) > 0;
-    cells += `<button class="cd${k === today ? ' tdy2' : ''}${k === cur ? ' sel' : ''}" data-cal="${k}"><b>${n}</b><small>${hijD(dt)}</small><u>${has ? '<s class="e"></s>' : ''}${tr ? '<s class="t"></s>' : ''}</u></button>`;
+    const dt = new Date(cm.y, cm.m, n), k = iso(dt), has = (S.ev[k] || []).length, tp = S.track[k] ? dayPct(k) : 0, tr = tp > 0;
+    cells += `<button class="cd${k === today ? ' tdy2' : ''}${k === cur ? ' sel' : ''}" data-cal="${k}"><b>${n}</b><small>${hijD(dt)}</small><u>${has ? '<s class="e"></s>' : ''}${tr ? `<s class="t ${rcls(tp)}"></s>` : ''}</u></button>`;
   }
   const mn = first.toLocaleDateString(LOC, { month: 'long', year: 'numeric' }), hmn = (() => { try { return new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', { month: 'long', year: 'numeric' }).format(new Date(cm.y, cm.m, 15)); } catch (e) { return ''; } })();
   const d = parse(cur), evs = S.ev[cur] || [];
   return `<div class="dn"><button data-cm="-1">‹</button><div><b>${mn}</b><small>${hmn}</small></div><button data-cm="1">›</button></div>
 <div class="card cal"><div class="cw">${DAYS.map(x => `<small>${x.replace('ال', '')}</small>`).join('')}</div><div class="cg">${cells}</div></div>
+${(() => { const M = monthStats(cm.y, cm.m); if (!M.cnt) return '<div class="card sm">الإنجاز الشهري يظهر بعد بداية الشهر.</div>'; return `<h3>📈 الإنجاز الشهري — ${mn}</h3>
+<div class="card hero"><div class="ring ${rcls(M.avg)}" style="--p:${M.avg}"><span>${M.avg}%</span></div><div><b>متوسط إنجاز الشهر</b><div class="sm">${rate(M.avg)}</div><div class="sm">${M.tracked} يوم مسجّل من ${M.cnt}</div></div></div>
+<div class="grid3"><div class="card sc g"><b>${M.hi}</b><small>أيام ≥ 80%</small></div><div class="card sc y"><b>${M.mid}</b><small>أيام 50–79%</small></div><div class="card sc r"><b>${M.lo}</b><small>أيام &lt; 50%</small></div></div>
+<div class="card"><b>إنجاز كل يوم</b><div class="mc">${M.days.map(x => `<button data-go="${x.k}" title="${x.n}"><i class="${rcls(x.p)}" style="height:${Math.max(3, x.p)}%"></i><small>${x.n}</small></button>`).join('')}</div>
+<div class="sm">${M.best && M.best.p > 0 ? `أفضل يوم: ${M.best.n} (${M.best.p}%)` : ''}${M.worst ? ` • أضعف يوم مسجّل: ${M.worst.n} (${M.worst.p}%)` : ''}</div></div>
+${M.cats.map(c => `<div class="card row cat"><span>${c.ic} ${c.t}</span><div class="bar"><i class="${rcls(c.p)}" style="width:${c.p}%"></i></div><b>${c.p}%</b><em class="${rcls(c.p)}">${rate(c.p)}</em></div>`).join('')}`; })()}
 <div class="card"><b>${fmtL(d)}</b><small>${hij(d)}</small>
 <div class="pg mini">${prayers(d).map(x => `<div><small>${x[0]}</small><b>${hm(x[1])}</b></div>`).join('')}</div>
 <button class="big s" data-go="${cur}">فتح خطة هذا اليوم (${dayPct(cur)}%)</button></div>
