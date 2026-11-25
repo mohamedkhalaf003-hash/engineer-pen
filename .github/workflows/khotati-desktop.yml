@@ -1,0 +1,38 @@
+name: Build Khotati Desktop (Windows)
+on:
+  push:
+    branches: [main]
+    paths: ['khotati-desktop/**', 'khotati-plan/web/**', '.github/workflows/khotati-desktop.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: write
+defaults:
+  run:
+    working-directory: khotati-desktop
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pip install pillow
+      - run: python make_icon.py
+      - run: |
+          mkdir app
+          Copy-Item ../khotati-plan/web/* app/
+          '{"v":${{ github.run_number }}}' | Out-File -Encoding ascii app/version.json
+      - run: npm install
+      - run: npx electron-builder --win portable --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Khotati-exe
+          path: khotati-desktop/dist/Khotati.exe
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "khotati-desktop-v1.${{ github.run_number }}" dist/Khotati.exe --title "Khotati Desktop v1.${{ github.run_number }}" --notes "خطتي للكمبيوتر (Windows)" --latest=false

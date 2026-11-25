@@ -279,14 +279,7 @@ function csv() {
   return '\ufeff' + [head, ...rows].map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
 }
 /* ---------- notifications ---------- */
-async function sched(ask) {
-  if (!Capacitor.isNativePlatform()) return;
-  try {
-    let pm = await LocalNotifications.checkPermissions();
-    if (pm.display !== 'granted' && ask) pm = await LocalNotifications.requestPermissions();
-    if (pm.display !== 'granted') return;
-    try { await LocalNotifications.createChannel({ id: 'pray', name: 'مواقيت الصلاة', importance: 5, vibration: true, visibility: 1 }); await LocalNotifications.createChannel({ id: 'plan', name: 'الخطة والمفكرة', importance: 4, vibration: true, visibility: 1 }); } catch (e) { }
-    const pend = await LocalNotifications.getPending(); if (pend.notifications.length) await LocalNotifications.cancel({ notifications: pend.notifications.map(x => ({ id: x.id })) });
+function buildList() {
     const now = new Date(), N = S.set.n, list = []; let evn = 0;
     const add = (id, at, title, body, ch) => { if (at > now) list.push({ id, title, body, channelId: ch, schedule: { at, allowWhileIdle: true } }); };
     const atT = (d, hh, mm) => { const x = new Date(d); x.setHours(hh, mm, 0, 0); return x; };
@@ -316,6 +309,23 @@ async function sched(ask) {
       if (N.log) add(base + 40, atT(d, 21, 30), '✅ سجّل إنجاز اليوم', 'افتح خطتي وحدّد تم / جزئي / لم يتم', 'plan');
       if (N.ev) (S.ev[key] || []).forEach(e => { if (e.rem && e.tm) { const [h, m] = e.tm.split(':').map(Number); add(50000 + (++evn), atT(d, h, m), '📅 ' + e.t, hij(d), 'plan'); } });
     }
+  return list;
+}
+const isElectron = /Electron/i.test(navigator.userAgent);
+let wl = [], wlT = 0; const fired = new Set();
+function webTick() {
+  const now = Date.now(); if (now - wlT > 300000) { wl = buildList(); wlT = now; }
+  for (const n of wl) { const t = n.schedule.at.getTime(), k = n.id + '-' + t; if (t <= now && t > now - 120000 && !fired.has(k)) { fired.add(k); try { const x = new Notification(n.title, { body: n.body, silent: false }); x.onclick = () => window.focus(); } catch (e) { } } }
+}
+async function sched(ask) {
+  if (!Capacitor.isNativePlatform()) { wlT = 0; if ('Notification' in window && Notification.permission === 'default' && ask) await Notification.requestPermission(); S.set.scheduled = buildList().length; save(); return; }
+  try {
+    let pm = await LocalNotifications.checkPermissions();
+    if (pm.display !== 'granted' && ask) pm = await LocalNotifications.requestPermissions();
+    if (pm.display !== 'granted') return;
+    try { await LocalNotifications.createChannel({ id: 'pray', name: 'مواقيت الصلاة', importance: 5, vibration: true, visibility: 1 }); await LocalNotifications.createChannel({ id: 'plan', name: 'الخطة والمفكرة', importance: 4, vibration: true, visibility: 1 }); } catch (e) { }
+    const pend = await LocalNotifications.getPending(); if (pend.notifications.length) await LocalNotifications.cancel({ notifications: pend.notifications.map(x => ({ id: x.id })) });
+    const list = buildList();
     if (list.length) await LocalNotifications.schedule({ notifications: list });
     S.set.scheduled = list.length; save();
   } catch (e) { S.set.err = String(e.message || e); }
@@ -326,11 +336,11 @@ let VER = 0; fetch('version.json').then(r => r.json()).then(j => { VER = j.v || 
 async function checkUpdate() {
   try {
     const r = await fetch('https://api.github.com/repos/mohamedkhalaf003-hash/engineer-pen/releases?per_page=40'); const j = await r.json();
-    const rel = j.filter(x => /^khotati-plan-v1\.\d+$/.test(x.tag_name)).sort((a, b) => +b.tag_name.split('.').pop() - +a.tag_name.split('.').pop())[0];
+    const rel = j.filter(x => (isElectron ? /^khotati-desktop-v1\.\d+$/ : /^khotati-plan-v1\.\d+$/).test(x.tag_name)).sort((a, b) => +b.tag_name.split('.').pop() - +a.tag_name.split('.').pop())[0];
     if (!rel) return toast('لا توجد نسخة منشورة');
     const n = +rel.tag_name.split('.').pop(); if (n <= VER) return toast('أنت على آخر نسخة ✔ (' + VER + ')');
-    const as = rel.assets.find(a => /\.apk$/.test(a.name)); if (!as) return toast('النسخة غير جاهزة بعد');
-    if (confirm('يوجد تحديث جديد (' + n + '). تنزيله الآن؟ (بياناتك تبقى كما هي إن كان التوقيع نفسه، وخذ نسخة احتياطية أولًا)')) Browser.open({ url: as.browser_download_url });
+    const as = rel.assets.find(a => isElectron ? /\.exe$/.test(a.name) : /\.apk$/.test(a.name)); if (!as) return toast('النسخة غير جاهزة بعد');
+    if (confirm('يوجد تحديث جديد (' + n + '). تنزيله الآن؟ (بياناتك تبقى كما هي إن كان التوقيع نفسه، وخذ نسخة احتياطية أولًا)')) (isElectron ? window.open(as.browser_download_url, '_blank') : Browser.open({ url: as.browser_download_url }));
   } catch (e) { toast('تعذر الاتصال بالإنترنت'); }
 }
 
@@ -373,6 +383,6 @@ ${[['pray', 'مواقيت الصلاة'], ['adhkar', 'الأذكار'], ['tasks'
   $('#fi').onchange = async e => { try { const j = JSON.parse(await e.target.files[0].text()); for (const k of ['track', 'books', 'series', 'weeks', 'batches', 'ev']) S[k] = j[k] || {}; if (j.set) S.set = j.set; if (j.custom) S.custom = j.custom; save(); s.hidden = true; toast('تم الاسترجاع'); setTimeout(() => location.reload(), 600); } catch (x) { toast('الملف غير صالح'); } };
   $('#rs').onclick = () => { if (confirm('مسح كل البيانات؟ لا يمكن التراجع.')) { localStorage.removeItem(KEY); location.reload(); } };
 }
-render(); sched();
+render(); sched(); if (!Capacitor.isNativePlatform()) { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); setInterval(webTick, 15000); webTick(); }
 setInterval(() => { const n = $('#nx'); if (n && tab === 'today' && cur === iso(new Date())) n.innerHTML = nextTxt(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); sched(); } });

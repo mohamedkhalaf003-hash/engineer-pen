@@ -1,0 +1,17 @@
+{
+  "name": "khotati-desktop",
+  "productName": "خطتي",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "description": "خطتي - المفكرة والخطة اليومية",
+  "author": "Mohamed Khalaf",
+  "devDependencies": { "electron": "^33.0.0", "electron-builder": "^25.1.8" },
+  "build": {
+    "appId": "com.mohamed.khotati.desktop",
+    "productName": "Khotati",
+    "files": ["main.js", "app/**/*"],
+    "icon": "icon.png",
+    "win": { "target": [{ "target": "portable", "arch": ["x64"] }], "artifactName": "Khotati.exe" }
+  }
+}
