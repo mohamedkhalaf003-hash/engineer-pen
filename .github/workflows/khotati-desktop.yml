@@ -19,20 +19,21 @@ jobs:
           node-version: 22
       - run: pip install pillow
       - run: python make_icon.py
-      - run: |
+      - shell: bash
+        run: |
           mkdir app
-          Copy-Item ../khotati-plan/web/* app/
-          '{"v":${{ github.run_number }}}' | Out-File -Encoding ascii app/version.json
+          cp ../khotati-plan/web/* app/
+          echo '{"v":${{ github.run_number }}}' > app/version.json
       - run: npm install
-      - run: npx electron-builder --win portable --publish never
+      - run: npx electron-builder --win nsis portable --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
       - uses: actions/upload-artifact@v4
         with:
           name: Khotati-exe
-          path: khotati-desktop/dist/Khotati.exe
+          path: khotati-desktop/dist/*.exe
       - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "khotati-desktop-v1.${{ github.run_number }}" dist/Khotati.exe --title "Khotati Desktop v1.${{ github.run_number }}" --notes "خطتي للكمبيوتر (Windows)" --latest=false
+        run: gh release create "khotati-desktop-v1.${{ github.run_number }}" dist/Khotati-Setup.exe dist/Khotati-Portable.exe --title "Khotati Desktop v1.${{ github.run_number }}" --notes "خطتي للكمبيوتر (Windows)" --latest=false

@@ -6,12 +6,44 @@
   "main": "main.js",
   "description": "خطتي - المفكرة والخطة اليومية",
   "author": "Mohamed Khalaf",
-  "devDependencies": { "electron": "^33.0.0", "electron-builder": "^25.1.8" },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
   "build": {
     "appId": "com.mohamed.khotati.desktop",
     "productName": "Khotati",
-    "files": ["main.js", "app/**/*"],
+    "files": [
+      "main.js",
+      "app/**/*"
+    ],
     "icon": "icon.png",
-    "win": { "target": [{ "target": "portable", "arch": ["x64"] }], "artifactName": "Khotati.exe" }
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "artifactName": "Khotati-Setup.exe",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "Khotati-Portable.exe"
+    }
   }
 }

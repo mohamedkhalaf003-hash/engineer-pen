@@ -338,7 +338,7 @@ async function checkUpdate() {
     const rel = j.filter(x => (isElectron ? /^khotati-desktop-v1\.\d+$/ : /^khotati-plan-v1\.\d+$/).test(x.tag_name)).sort((a, b) => +b.tag_name.split('.').pop() - +a.tag_name.split('.').pop())[0];
     if (!rel) return toast('لا توجد نسخة منشورة');
     const n = +rel.tag_name.split('.').pop(); if (n <= VER) return toast('أنت على آخر نسخة ✔ (' + VER + ')');
-    const as = rel.assets.find(a => isElectron ? /\.exe$/.test(a.name) : /\.apk$/.test(a.name)); if (!as) return toast('النسخة غير جاهزة بعد');
+    const as = rel.assets.find(a => isElectron ? /Setup\.exe$/.test(a.name) : /\.apk$/.test(a.name)); if (!as) return toast('النسخة غير جاهزة بعد');
     if (confirm('يوجد تحديث جديد (' + n + '). تنزيله الآن؟ (بياناتك تبقى كما هي إن كان التوقيع نفسه، وخذ نسخة احتياطية أولًا)')) (isElectron ? window.open(as.browser_download_url, '_blank') : Browser.open({ url: as.browser_download_url }));
   } catch (e) { toast('تعذر الاتصال بالإنترنت'); }
 }
