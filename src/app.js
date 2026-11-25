@@ -24,6 +24,7 @@ function persist() {
 /* ---------- UI shell ---------- */
 document.body.innerHTML = `
 <div id="bar">
+  <button data-a="save" class="sv">💾 حفظ PDF</button>
   <button data-a="open">📂 فتح PDF</button>
   <button data-a="draft">📝 مسودة</button>
   <button data-a="nb">📒 نوت بوك</button>
@@ -36,11 +37,11 @@ document.body.innerHTML = `
   <button data-a="finger" id="bf">☝️ إصبع: لا</button>
   <i></i>
   <button data-a="undo">↶ تراجع</button>
-  <button data-a="save">💾 حفظ PDF</button>
   <button data-a="orient">⇅ تقسيم</button>
   <button data-a="fs">⛶</button>
 </div>
 <div id="panes"></div>
+<div id="fabs"><button class="fab" data-a="share" title="مشاركة">📤</button><button class="fab main" data-a="save">💾<span>حفظ</span></button></div>
 <input id="file" type="file" accept="application/pdf" multiple hidden>
 <div id="toast"></div>`;
 const st = document.createElement('style');
@@ -68,10 +69,16 @@ body{display:flex;flex-direction:column}
 .dv{flex:none;background:#0f172a;touch-action:none}
 #panes.row>.dv{width:12px;cursor:col-resize}
 #panes.column>.dv{height:12px;cursor:row-resize}
+#bar button.sv{background:#0f766e}
+#fabs{position:fixed;left:14px;bottom:18px;display:flex;flex-direction:column;gap:10px;align-items:center;z-index:50}
+.fab{border:0;border-radius:50%;width:52px;height:52px;font-size:22px;background:#374151;color:#fff;box-shadow:0 4px 14px #0008}
+.fab.main{width:72px;height:72px;background:#0f766e;font-size:26px;line-height:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.fab.main span{font-size:12px;font-weight:700;margin-top:2px}
+#toast{bottom:110px;max-width:90%;text-align:center;white-space:pre-line}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000c;color:#fff;padding:10px 16px;border-radius:10px;opacity:0;transition:.3s;pointer-events:none;font-size:14px}
 #toast.s{opacity:1}`;
 document.head.appendChild(st);
-const toast = m => { const t = $('#toast'); t.textContent = m; t.classList.add('s'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('s'), 2200); };
+const toast = m => { const t = $('#toast'); t.textContent = m; t.classList.add('s'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('s'), 5000); };
 COLORS.forEach((c, i) => { const b = document.createElement('b'); b.style.background = c; if (!i) b.className = 'on'; b.onclick = () => { S.color = c; [...$('#cols').children].forEach(x => x.classList.toggle('on', x === b)); if (S.tool === 'er') setTool('pen'); }; $('#cols').appendChild(b); });
 $('#wd').oninput = e => S.width = e.target.value * 0.00095;
 function setTool(t) { S.tool = t; document.querySelectorAll('[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t)); }
@@ -307,7 +314,7 @@ async function exportPdf(p) {
   });
   return await doc.save();
 }
-async function savePane() {
+async function savePane(share) {
   const p = S.active; if (!p) return toast('افتح ملف أو مسودة أولاً');
   toast('جارٍ الحفظ…');
   try {
@@ -318,8 +325,9 @@ async function savePane() {
       for (let i = 0; i < out.length; i += CH) b64 += String.fromCharCode.apply(null, out.subarray(i, i + CH));
       b64 = btoa(b64);
       try {
+        if (share) throw new Error('share');
         await Filesystem.writeFile({ path: 'EngineerPen/' + base + '.pdf', data: b64, directory: Directory.Documents, recursive: true });
-        toast('تم الحفظ في Documents/EngineerPen: ' + base + '.pdf');
+        toast('✅ تم الحفظ في: الملفات ← Documents ← EngineerPen\n' + base + '.pdf');
       } catch (e) {
         const r = await Filesystem.writeFile({ path: base + '.pdf', data: b64, directory: Directory.Cache });
         await Share.share({ title: base + '.pdf', files: [r.uri], dialogTitle: 'حفظ أو مشاركة PDF' });
@@ -344,7 +352,8 @@ document.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
   if (a === 'nb') addPane('nb', 'نوت بوك', [{ w: A4[0], h: A4[1], strokes: [] }]);
   if (a === 'finger') { S.finger = !S.finger; b.textContent = '☝️ إصبع: ' + (S.finger ? 'نعم' : 'لا'); b.classList.toggle('on', S.finger); }
   if (a === 'undo') undo();
-  if (a === 'save') savePane();
+  if (a === 'save') savePane(false);
+  if (a === 'share') savePane(true);
   if (a === 'orient') { S.orient = S.orient === 'column' ? 'row' : 'column'; layoutPanes(); autosave(); }
   if (a === 'fs') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => { }); }
 });
