@@ -173,7 +173,7 @@ function renderVisible(p) {
 }
 async function renderPage(p, g) {
   g.dirty = false;
-  const cw = g.el.clientWidth, dpr = Math.min(2, window.devicePixelRatio || 1), W = Math.round(cw * dpr), H = Math.round(cw * g.h / g.w * dpr);
+  const cw = g.el.clientWidth, dpr = Math.min(3, window.devicePixelRatio || 1), W = Math.round(cw * dpr), H = Math.round(cw * g.h / g.w * dpr);
   g.bg.width = g.ink.width = W; g.bg.height = g.ink.height = H;
   const ctx = g.bg.getContext('2d');
   if (p.kind === 'pdf') {
@@ -291,7 +291,7 @@ async function openPdfFiles(files) {
   for (const f of files) {
     try {
       const bytes = await f.arrayBuffer();
-      const pdf = await pdfjs.getDocument({ data: bytes.slice(0) }).promise;
+      const pdf = await pdfjs.getDocument({ data: bytes.slice(0), cMapUrl: 'pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: 'pdfjs/standard_fonts/', useSystemFonts: true, disableFontFace: true }).promise;
       const pages = [];
       for (let i = 1; i <= pdf.numPages; i++) { const v = (await pdf.getPage(i)).getViewport({ scale: 1 }); pages.push({ w: v.width, h: v.height, strokes: [] }); }
       if (!addPane('pdf', f.name, pages, { bytes, pdf })) break;
@@ -385,7 +385,7 @@ window.addEventListener('beforeunload', persist);
     S.orient = s.orient || 'column';
     for (const q of s.panes) {
       let pdf = null;
-      if (q.kind === 'pdf' && q.bytes) { try { pdf = await pdfjs.getDocument({ data: q.bytes.slice(0) }).promise; } catch (e) { continue; } }
+      if (q.kind === 'pdf' && q.bytes) { try { pdf = await pdfjs.getDocument({ data: q.bytes.slice(0), cMapUrl: 'pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: 'pdfjs/standard_fonts/', useSystemFonts: true, disableFontFace: true }).promise; } catch (e) { continue; } }
       addPane(q.kind, q.name, q.pages, { bytes: q.bytes, pdf, zoom: q.zoom });
     }
     toast('تم استرجاع شغلك السابق');
