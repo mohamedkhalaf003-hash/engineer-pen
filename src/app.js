@@ -1,6 +1,9 @@
 import * as pdfjs from 'pdfjs-dist/build/pdf.min.mjs';
 import { PDFDocument, rgb, LineCapStyle } from 'pdf-lib';
 import workerText from './worker.js';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([workerText], { type: 'text/javascript' }));
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -310,9 +313,22 @@ async function savePane() {
   try {
     const out = await exportPdf(p);
     const base = p.kind === 'pdf' ? p.name.replace(/\.pdf$/i, '') + '-معدّل' : (p.kind === 'nb' ? 'نوت-بوك-' : 'مسودة-') + stamp();
-    const blob = new Blob([out], { type: 'application/pdf' }), a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = base + '.pdf'; document.body.appendChild(a); a.click(); a.remove();
-    toast('تم الحفظ في التنزيلات: ' + base + '.pdf');
+    if (Capacitor.isNativePlatform()) {
+      let b64 = ''; const CH = 0x8000;
+      for (let i = 0; i < out.length; i += CH) b64 += String.fromCharCode.apply(null, out.subarray(i, i + CH));
+      b64 = btoa(b64);
+      try {
+        await Filesystem.writeFile({ path: 'EngineerPen/' + base + '.pdf', data: b64, directory: Directory.Documents, recursive: true });
+        toast('تم الحفظ في Documents/EngineerPen: ' + base + '.pdf');
+      } catch (e) {
+        const r = await Filesystem.writeFile({ path: base + '.pdf', data: b64, directory: Directory.Cache });
+        await Share.share({ title: base + '.pdf', files: [r.uri], dialogTitle: 'حفظ أو مشاركة PDF' });
+      }
+    } else {
+      const blob = new Blob([out], { type: 'application/pdf' }), a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = base + '.pdf'; document.body.appendChild(a); a.click(); a.remove();
+      toast('تم الحفظ في التنزيلات: ' + base + '.pdf');
+    }
   } catch (e) { toast('فشل الحفظ: ' + e.message); }
 }
 function undo() {

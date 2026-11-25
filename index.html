@@ -10,5 +10,5 @@
 <link rel="apple-touch-icon" href="icon-512.png">
 </head><body>
 <script type="module" src="app.js"></script>
-<script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js'))</script>
+<script>if(!window.Capacitor&&'serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js'))</script>
 </body></html>
