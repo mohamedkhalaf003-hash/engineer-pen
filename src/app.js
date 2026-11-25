@@ -49,6 +49,7 @@ document.body.innerHTML = `
 <div id="fabs"><button class="fab" data-a="share" title="مشاركة">📤</button><button class="fab main" data-a="save">💾<span>حفظ</span></button></div>
 <input id="file" type="file" accept="application/pdf" multiple hidden>
 <div id="toast"></div>`;
+if (Capacitor.isNativePlatform()) document.documentElement.classList.add('native');
 const st = document.createElement('style');
 st.textContent = `
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -65,6 +66,9 @@ body{display:flex;flex-direction:column}
 .tl button.on{background:#2563eb;box-shadow:0 0 0 2px #93c5fd inset}
 .tl button.sv{background:#0f766e}
 .cw{display:flex;align-items:center;gap:12px;margin-top:10px;padding:0 4px}
+html.native body{padding-top:max(env(safe-area-inset-top),40px);padding-bottom:max(env(safe-area-inset-bottom),34px)}
+html.native #fabs{bottom:calc(max(env(safe-area-inset-bottom),34px) + 16px)}
+html.native #toast{bottom:calc(max(env(safe-area-inset-bottom),34px) + 120px)}
 #showbar{background:#0f766e;color:#fff;border:0;padding:8px;font-size:14px;font-weight:700;flex:none}
 #cols{display:flex;gap:5px;flex:none}
 #cols b{width:28px;height:28px;border-radius:50%;border:3px solid #374151;flex:none}
