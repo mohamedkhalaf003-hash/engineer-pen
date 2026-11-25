@@ -129,9 +129,8 @@ function vToday() {
   return `
 <div class="dn"><button data-nav="-1">‹</button><div><b>${DAYS[di]}</b><small>${fmt(d)}${isToday ? ' • اليوم' : ''}</small></div><button data-nav="1">›</button></div>
 ${isToday ? '' : '<button class="tdy" data-nav="0">العودة لليوم</button>'}
-<div class="card pr"><div class="dl"><b>${hij(d)}</b><span>${fmt(d)} ${d.getFullYear()} م</span></div>
-<div class="nx" id="nx">${isToday ? nextTxt() : ''}</div>
-<div class="pg">${prayers(d).map(x => `<div class="${x[0] === 'الشروق' ? 'sr' : ''}"><small>${x[0]}</small><b>${hm(x[1])}</b></div>`).join('')}</div><small class="pc">📍 ${place()[0]}</small></div>
+<div class="ban"><img src="hero.jpg" alt=""><div class="ov"><div class="dl"><b>${hij(d)}</b><span>${fmt(d)} ${d.getFullYear()} م</span></div><div class="nx" id="nx">${isToday ? nextTxt() : ''}</div></div></div>
+<div class="card pr"><div class="pg">${prayers(d).map(x => `<div class="${x[0] === 'الشروق' ? 'sr' : ''}"><small>${x[0]}</small><b>${hm(x[1])}</b></div>`).join('')}</div><small class="pc">📍 ${place()[0]}</small></div>
 <div class="card hero"><div class="ring ${rcls(pct)}" style="--p:${pct}"><span>${pct}%</span></div>
  <div><b>إنجاز اليوم</b><div class="sm">${rate(pct)}</div><div class="sm">8:30 ص — مراجعة إنجاز أمس: <b>${yp}%</b></div></div></div>
 ${sites.length ? `<div class="card sites">${sites.join('<br>')}</div>` : ''}

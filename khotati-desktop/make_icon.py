@@ -1,5 +1,5 @@
 from PIL import Image, ImageDraw
-S=512; BG=(185,28,28,255)
+S=512; BG=(13,148,136,255)
 im=Image.new('RGBA',(S*2,S*2),(0,0,0,0)); d=ImageDraw.Draw(im); k=2.0
 sc=lambda p:(p[0]*k,p[1]*k)
 d.rounded_rectangle((0,0,S*2-1,S*2-1),220,fill=BG)

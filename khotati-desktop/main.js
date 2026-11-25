@@ -5,7 +5,7 @@ if (!app.requestSingleInstanceLock()) { app.quit(); }
 let win, tray, quitting = false;
 function show() { if (!win) return; if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
 function create() {
-  win = new BrowserWindow({ width: 1100, height: 800, minWidth: 380, minHeight: 600, backgroundColor: '#160a0b', autoHideMenuBar: true, title: 'خطتي', icon: path.join(__dirname, 'icon.png'), webPreferences: { backgroundThrottling: false } });
+  win = new BrowserWindow({ width: 1100, height: 800, minWidth: 380, minHeight: 600, backgroundColor: '#101826', autoHideMenuBar: true, title: 'خطتي', icon: path.join(__dirname, 'icon.png'), webPreferences: { backgroundThrottling: false } });
   win.setMenuBarVisibility(false); win.maximize();
   win.loadFile(path.join(__dirname, 'app', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
