@@ -98,6 +98,29 @@ const toast = m => { const t = $('#toast'); t.textContent = m; t.classList.add('
 const chips = (cur, attr) => ST.map(s => `<button class="ch c${ST.indexOf(s)}${cur === s ? ' on' : ''}" ${attr} data-v="${s}">${s === 'تم' ? '✓ ' : s === 'جزئي' ? '◐ ' : '✗ '}${s}</button>`).join('');
 
 /* ---------- views ---------- */
+const weekFor = k => D.weeks.find(w => k >= w.frm && k <= w.to);
+const activeWk = (str, n) => /كل/.test(str) || !n || (String(str).match(/\d+/g) || []).includes(String(n));
+function gymParts(p) { const m = String(p.gym || '').match(/^(صالة|بيت)\s*:\s*(.*)$/); return m ? { where: m[1], parts: m[2].split('+').map(x => x.trim()).filter(Boolean) } : { where: '', parts: [] }; }
+function extra(it, di, k, t) {
+  const p = PLAN[di], w = weekFor(k), day = DAYS[di];
+  if (it.k === 'sharia') {
+    const bs = D.books.filter(b => b.day === day); if (!bs.length) return '';
+    const topic = w && w[WK[di]];
+    return bs.map(b => { const on = w && activeWk(b.weeks, w.n); return `<div class="mb${on ? ' on' : ''}"><div class="bh"><span class="tag">${esc(b.branch)}</span>${on ? '<span class="tag t3">هذا الأسبوع</span>' : ''}<span class="sm">أسابيع: ${esc(b.weeks)}</span></div>
+<b>${esc(b.book)}</b><small>${esc(b.author)}</small>${on && topic ? `<div class="tp">📌 ${esc(topic)}</div>` : ''}<div class="kv"><b>الهدف:</b> ${esc(b.goal)}</div><div class="kv"><b>بعده:</b> ${esc(b.next)}</div></div>`; }).join('') + (!w ? '<small>تبدأ مواضيع الأسابيع من ' + fmt(parse(D.meta.start)) + '</small>' : '');
+  }
+  if (it.k === 'taf') return w ? `<div class="mb on"><div class="tp">🎧 ${esc(w.taf)}</div>${w.name ? `<small>${esc(w.name)}</small>` : ''}</div>` : '';
+  if (it.k === 'gym') {
+    const g = gymParts(p); if (!g.parts.length) return '';
+    const done = t.g || [];
+    return `<div class="gy"><small>${g.where === 'صالة' ? '🏋️ تمرين الصالة' : '🏠 نشاط البيت'} — اضغط لتحديد ما أنجزته</small><div class="gp">${g.parts.map((x, i) => `<button class="gb${done.includes(i) ? ' on' : ''}" data-gym="${i}">${done.includes(i) ? '✓ ' : ''}${esc(x)}</button>`).join('')}</div></div>`;
+  }
+  if (it.k === 'content') {
+    const ss = D.series.map((x, i) => ({ x, i })).filter(({ x }) => x.day.includes(day) || x.day.includes('يوميًا'));
+    return (w && w.content ? `<div class="mb on"><div class="tp">📌 هذا الأسبوع: ${esc(w.content)}</div></div>` : '') + ss.map(({ x, i }) => `<div class="mb"><b>${esc(x.file)}</b> <small>${esc(x.name)} — ${S.series[i] || 0}/${x.target}</small><div class="do">✅ ${esc(x.do)}</div><div class="dont">⛔ ${esc(x.dont)}</div></div>`).join('');
+  }
+  return '';
+}
 function vToday() {
   const d = parse(cur), di = dIdx(d), p = PLAN[di], t = S.track[cur] || { s: {}, n: '' };
   const pct = dayPct(cur), y = iso(addDays(d, -1)), yp = dayPct(y);
@@ -116,7 +139,7 @@ ${ITEMS.map(it => {
     if (isNA(it.k, di)) return `<div class="card it na"><div class="ih"><span class="ic">${it.ic}</span><div><b>${it.t}</b><small>غير مطلوب اليوم</small></div></div></div>`;
     const v = (t.s || {})[it.k];
     return `<div class="card it ${v ? 'd' + ST.indexOf(v) : ''}"><div class="ih"><span class="ic">${it.ic}</span><div><b>${it.t}</b><small>${it.tm}</small></div></div>
-<div class="pl">${esc(it.plan(p) || '—')}</div><div class="chs" data-item="${it.k}">${chips(v, 'data-set')}</div></div>`;
+<div class="pl">${esc(it.plan(p) || '—')}</div>${extra(it, di, cur, t)}<div class="chs" data-item="${it.k}">${chips(v, 'data-set')}</div></div>`;
   }).join('')}
 <div class="card"><b>ملاحظات اليوم</b><textarea id="note" rows="3" placeholder="اكتب ملاحظاتك…">${esc(t.n || '')}</textarea></div>`;
 }
@@ -221,6 +244,7 @@ document.addEventListener('click', e => {
   if (t.dataset.evdel) { S.ev[cur] = (S.ev[cur] || []).filter(e => e.id !== t.dataset.evdel); save(); render(); sched(); return; }
   if (t.dataset.go) { cur = t.dataset.go; tab = 'today'; $('#view').scrollTop = 0; render(); return; }
   if (t.dataset.sr !== undefined) { const i = t.dataset.sr; S.series[i] = Math.max(0, (S.series[i] || 0) + +t.dataset.d); save(); render(); return; }
+  if (t.dataset.gym !== undefined) { const x = S.track[cur] = S.track[cur] || { s: {}, n: '' }, i = +t.dataset.gym, n = gymParts(PLAN[dIdx(parse(cur))]).parts.length; x.g = x.g || []; x.g = x.g.includes(i) ? x.g.filter(a => a !== i) : [...x.g, i]; x.s.gym = x.g.length === 0 ? undefined : x.g.length >= n ? 'تم' : 'جزئي'; save(); render(); return; }
   if (t.hasAttribute('data-set')) {
     const box = t.parentElement, v = t.dataset.v;
     const flip = o => { o[box.dataset.k] = undefined; };
