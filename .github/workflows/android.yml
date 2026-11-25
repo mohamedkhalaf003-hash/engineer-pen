@@ -2,7 +2,7 @@ name: Build Android APK
 on:
   push:
     branches: [main]
-    paths-ignore: ['**.md']
+    paths-ignore: ['**.md', 'mohamed-caller/**', '.github/workflows/caller.yml']
   workflow_dispatch: {}
 permissions:
   contents: write

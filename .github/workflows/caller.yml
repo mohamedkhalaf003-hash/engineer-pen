@@ -1,0 +1,73 @@
+name: Build Mohamed Caller APK
+on:
+  push:
+    branches: [main]
+    paths: ['mohamed-caller/**', '.github/workflows/caller.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: write
+defaults:
+  run:
+    working-directory: mohamed-caller
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm install
+      - run: npx cap add android
+      - name: Native code, manifest, icons
+        run: |
+          D=android/app/src/main/java/com/mohamedcaller/app
+          mkdir -p $D && cp native/*.java $D/
+          python3 - <<'PY'
+          p='android/app/src/main/AndroidManifest.xml'
+          s=open(p).read()
+          perms='''    <uses-permission android:name="android.permission.READ_CONTACTS"/>
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+          '''
+          svc='''    <service android:name=".CallScreenService" android:exported="true" android:permission="android.permission.BIND_SCREENING_SERVICE">
+                  <intent-filter><action android:name="android.telecom.CallScreeningService"/></intent-filter>
+              </service>
+          '''
+          s=s.replace('<application',perms+'<application',1).replace('</application>',svc+'</application>',1)
+          open(p,'w').write(s)
+          PY
+          sed -i 's/minSdkVersion = [0-9]*/minSdkVersion = 29/' android/variables.gradle
+          pip install pillow
+          python3 make_icons.py
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.${{ github.run_number }}\"/" android/app/build.gradle
+      - run: npx cap sync android
+      - name: Build release APK
+        run: cd android && ./gradlew assembleRelease --no-daemon
+      - name: Align and sign
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASS }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > ks.jks; PASS="$KS_PASS"
+          else
+            PASS=$(openssl rand -hex 12)
+            keytool -genkeypair -keystore ks.jks -alias pen -keyalg RSA -keysize 2048 -validity 12000 -storepass "$PASS" -keypass "$PASS" -dname "CN=Mohamed Caller, O=Personal"
+          fi
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -p -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          "$BT/apksigner" sign --ks ks.jks --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --ks-key-alias pen --out MohamedCaller.apk aligned.apk
+          "$BT/apksigner" verify MohamedCaller.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MohamedCaller-apk
+          path: mohamed-caller/MohamedCaller.apk
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "caller-v1.${{ github.run_number }}" MohamedCaller.apk --title "Mohamed Caller v1.${{ github.run_number }}" --notes "APK محمد كولر" --latest=false
