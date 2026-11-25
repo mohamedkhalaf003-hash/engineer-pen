@@ -24,8 +24,22 @@ jobs:
       - run: mkdir www && cp web/* www/
       - run: npm install
       - run: npx cap add android
-      - name: Icons and version
+      - name: Manifest, icons and version
         run: |
+          python3 - <<'PY'
+          p='android/app/src/main/AndroidManifest.xml'
+          s=open(p).read()
+          perms='''    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+          '''
+          s=s.replace('<application',perms+'<application',1)
+          open(p,'w').write(s)
+          PY
+          echo '{"v":${{ github.run_number }}}' > www/version.json
           pip install pillow
           python3 make_icons.py
           sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.${{ github.run_number }}\"/" android/app/build.gradle
