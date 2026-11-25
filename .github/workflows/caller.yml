@@ -21,6 +21,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      - run: mkdir www && cp web/* www/
       - run: npm install
       - run: npx cap add android
       - name: Native code, manifest, icons

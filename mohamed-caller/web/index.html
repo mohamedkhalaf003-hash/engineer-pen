@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>محمد كولر</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;padding:14px 14px 80px}
+h1{font-size:22px;margin:6px 0 14px}h2{font-size:16px;margin:0 0 10px;color:#5eead4}
+.c{background:#1e293b;border-radius:16px;padding:14px;margin-bottom:12px}
+button,select,input{font:inherit;border-radius:12px;border:0;padding:12px;width:100%;margin:4px 0}
+input,select{background:#0f172a;color:#e2e8f0;border:1px solid #334155}
+button{background:#0f766e;color:#fff;font-weight:700}button.s{background:#334155}button.r{background:#b91c1c}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #334155}
+.row:last-child{border:0}.ok{color:#4ade80}.no{color:#f87171}.sm{font-size:13px;color:#94a3b8}
+.tag{display:inline-block;padding:2px 8px;border-radius:8px;font-size:12px;color:#fff}
+.safe,.contact{background:#15803d}.spam,.block{background:#b91c1c}.unknown,.intl{background:#b45309}.hidden{background:#475569}
+input[type=checkbox]{width:24px;height:24px;margin:0}
+</style></head><body>
+<h1>🛡 محمد كولر</h1>
+
+<div class="c"><h2>1) تفعيل التطبيق (مرة واحدة)</h2>
+<div class="row"><span>كاشف المكالمات</span><b id="s_role" class="no">✗</b></div>
+<button id="b_role">تفعيل كاشف المكالمات</button>
+<div class="row"><span>العرض فوق المكالمة</span><b id="s_overlay" class="no">✗</b></div>
+<button id="b_overlay">السماح بالعرض فوق التطبيقات</button>
+<div class="row"><span>جهات الاتصال</span><b id="s_contacts" class="no">✗</b></div>
+<button id="b_contacts">السماح بقراءة جهات الاتصال</button>
+<div class="sm" id="nat">لو شغّلت التطبيق من المتصفح مش هيشتغل الكشف؛ لازم يكون متثبت كـ APK.</div></div>
+
+<div class="c"><h2>2) الإعدادات</h2>
+<div class="row"><span>تنبيه عند أي رقم غريب</span><input type="checkbox" id="alert"></div>
+<div class="row"><span>إظهار اسم المعروفين</span><input type="checkbox" id="showKnown"></div>
+<div class="row"><span>حظر الأرقام الدولية الغريبة</span><input type="checkbox" id="blockIntl"></div>
+<div class="row"><span>حظر الأرقام المخفية</span><input type="checkbox" id="blockHidden"></div>
+<div class="row"><span>حظر أي رقم مش مسجل عندي</span><input type="checkbox" id="blockUnknown"></div>
+<div class="row"><span>حظر المزعج المسجل</span><input type="checkbox" id="blockSpam"></div>
+<label class="sm">كود بلدك (الأرقام اللي تبدأ بيه مش دولية)</label><input id="home" dir="ltr" placeholder="+966"></div>
+
+<div class="c"><h2>3) قائمتي</h2>
+<input id="n" dir="ltr" inputmode="tel" placeholder="الرقم (مثال: +966501234567)">
+<input id="nm" placeholder="الاسم">
+<input id="nt" placeholder="ملاحظة (مثال: شركة تسويق)">
+<select id="ty"><option value="safe">آمن</option><option value="spam">مزعج (تنبيه)</option><option value="block">حظر</option></select>
+<button id="add">حفظ الرقم</button><div id="list"></div></div>
+
+<div class="c"><h2>4) افحص رقم</h2>
+<input id="q" dir="ltr" inputmode="tel" placeholder="اكتب رقم"><button class="s" id="chk">فحص</button><div id="qr" class="sm"></div></div>
+
+<div class="c"><h2>5) آخر المكالمات المفحوصة</h2><div id="log" class="sm">لا يوجد</div>
+<button class="s" id="rl">تحديث</button><button class="r" id="cl">مسح السجل</button></div>
+
+<script>
+const P=()=>window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.MohamedCaller;
+const K='mc_data';let D;
+try{D=JSON.parse(localStorage.getItem(K))}catch(e){}
+D=D||{entries:[],settings:{alert:true,showKnown:true,blockIntl:false,blockHidden:false,blockUnknown:false,blockSpam:true,home:'+966'}};
+const $=i=>document.getElementById(i);
+const names={safe:'آمن',spam:'مزعج',block:'محظور'};
+function save(){localStorage.setItem(K,JSON.stringify(D));const p=P();if(p)p.setData(D).catch(()=>{})}
+function draw(){
+ for(const k of ['alert','showKnown','blockIntl','blockHidden','blockUnknown','blockSpam'])$(k).checked=!!D.settings[k];
+ $('home').value=D.settings.home||'+966';
+ $('list').innerHTML=D.entries.map((e,i)=>`<div class="row"><div><b>${esc(e.name||e.number)}</b> <span class="tag ${e.type}">${names[e.type]}</span><div class="sm" dir="ltr">${esc(e.number)}</div><div class="sm">${esc(e.note||'')}</div></div><button class="r" style="width:auto" onclick="del(${i})">حذف</button></div>`).join('')||'<div class="sm">القائمة فاضية</div>';
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function del(i){D.entries.splice(i,1);save();draw()}
+for(const k of ['alert','showKnown','blockIntl','blockHidden','blockUnknown','blockSpam'])$(k).onchange=()=>{D.settings[k]=$(k).checked;save()};
+$('home').onchange=()=>{D.settings.home=$('home').value.trim()||'+966';save()};
+$('add').onclick=()=>{const n=$('n').value.trim();if(!n)return;D.entries=D.entries.filter(e=>e.number.replace(/\D/g,'')!==n.replace(/\D/g,''));
+ D.entries.unshift({number:n,name:$('nm').value.trim(),note:$('nt').value.trim(),type:$('ty').value});$('n').value=$('nm').value=$('nt').value='';save();draw()};
+const dg=s=>String(s||'').replace(/\D/g,'');
+function same(a,b){a=dg(a);b=dg(b);if(a.length<7||b.length<7)return a===b&&a.length>0;const n=Math.min(9,a.length,b.length);return a.slice(-n)===b.slice(-n)}
+$('chk').onclick=()=>{const q=$('q').value.trim();const h=D.entries.find(e=>same(e.number,q));let r;
+ if(h)r=`${names[h.type]}: ${h.name||''} ${h.note||''}`;
+ else if(!q)r='رقم مخفي';
+ else if(q.startsWith('+')&&!q.startsWith(D.settings.home||'+966'))r='رقم دولي غريب (جهات الاتصال بتتفحص وقت المكالمة فقط)';
+ else r='رقم غير مسجل في قائمتك (جهات الاتصال بتتفحص وقت المكالمة فقط)';
+ $('qr').textContent=r};
+async function st(){const p=P();if(!p){$('nat').style.display='block';return}$('nat').style.display='none';
+ try{const s=await p.status();for(const k of ['role','overlay','contacts']){$('s_'+k).textContent=s[k]?'✓':'✗';$('s_'+k).className=s[k]?'ok':'no'}}catch(e){}}
+for(const [b,m] of [['role','requestRole'],['overlay','requestOverlay'],['contacts','requestContacts']])$('b_'+b).onclick=async()=>{const p=P();if(!p)return alert('ثبّت التطبيق كـ APK الأول');try{await p[m]()}catch(e){}st()};
+const when=t=>new Date(t).toLocaleString('ar-SA');
+async function lg(){const p=P();if(!p)return;try{const r=await p.getLog();const a=JSON.parse(r.log);
+ $('log').innerHTML=a.length?a.map(e=>`<div class="row"><div><span class="tag ${e.kind}">${e.blocked?'محظور':e.kind}</span> <b>${esc(e.title)}</b><div dir="ltr">${esc(e.n||'—')}</div><div>${when(e.t)}</div></div>${e.n?`<button class="s" style="width:auto" onclick="fill('${esc(e.n)}')">سجّل</button>`:''}</div>`).join(''):'لا يوجد'}catch(e){}}
+function fill(n){$('n').value=n;scrollTo(0,document.body.scrollHeight*0.4);$('nm').focus()}
+$('rl').onclick=lg;$('cl').onclick=async()=>{const p=P();if(p){await p.clearLog();lg()}};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){st();lg()}});
+draw();save();st();lg();
+</script></body></html>
