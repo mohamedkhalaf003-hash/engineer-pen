@@ -24,22 +24,27 @@ function persist() {
 /* ---------- UI shell ---------- */
 document.body.innerHTML = `
 <div id="bar">
-  <button data-a="save" class="sv">💾 حفظ PDF</button>
-  <button data-a="open">📂 فتح PDF</button>
-  <button data-a="draft">📝 مسودة</button>
-  <button data-a="nb">📒 نوت بوك</button>
-  <i></i>
-  <button data-t="pen" class="on">✏️ قلم</button>
-  <button data-t="hl">🖍 هايلايت</button>
-  <button data-t="er">🧽 ممحاة</button>
-  <span id="cols"></span>
-  <input id="wd" type="range" min="1" max="12" value="4" title="السمك">
-  <button data-a="finger" id="bf">☝️ إصبع: لا</button>
-  <i></i>
-  <button data-a="undo">↶ تراجع</button>
-  <button data-a="orient">⇅ تقسيم</button>
-  <button data-a="fs">⛶</button>
+ <section class="bx"><h3>📁 الملفات والحفظ</h3><div class="tl">
+  <button data-a="save" class="sv"><b>💾</b><small>حفظ PDF</small></button>
+  <button data-a="share"><b>📤</b><small>مشاركة</small></button>
+  <button data-a="open"><b>📂</b><small>فتح PDF</small></button>
+  <button data-a="draft"><b>📝</b><small>مسودة</small></button>
+  <button data-a="nb"><b>📒</b><small>نوت بوك</small></button>
+ </div></section>
+ <section class="bx"><h3>✏️ أدوات الرسم</h3><div class="tl">
+  <button data-t="pen" class="on"><b>✏️</b><small>قلم</small></button>
+  <button data-t="hl"><b>🖍</b><small>هايلايت</small></button>
+  <button data-t="er"><b>🧽</b><small>ممحاة</small></button>
+  <button data-a="undo"><b>↶</b><small>تراجع</small></button>
+  <button data-a="finger" id="bf"><b>☝️</b><small>إصبع: لا</small></button>
+ </div><div class="cw"><span id="cols"></span><input id="wd" type="range" min="1" max="12" value="4" title="السمك"></div></section>
+ <section class="bx"><h3>🖥 العرض</h3><div class="tl">
+  <button data-a="orient"><b>⇅</b><small>تقسيم</small></button>
+  <button data-a="fs"><b>⛶</b><small>ملء الشاشة</small></button>
+  <button data-a="hide"><b>▲</b><small>إخفاء الأدوات</small></button>
+ </div></section>
 </div>
+<button id="showbar" data-a="show" hidden>▼ إظهار الأدوات</button>
 <div id="panes"></div>
 <div id="fabs"><button class="fab" data-a="share" title="مشاركة">📤</button><button class="fab main" data-a="save">💾<span>حفظ</span></button></div>
 <input id="file" type="file" accept="application/pdf" multiple hidden>
@@ -49,14 +54,22 @@ st.textContent = `
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:#1f2937;font-family:system-ui,"Segoe UI",Tahoma,sans-serif;direction:rtl;overflow:hidden;overscroll-behavior:none}
 body{display:flex;flex-direction:column}
-#bar{display:flex;gap:6px;align-items:center;padding:6px;background:#111827;overflow-x:auto;white-space:nowrap;flex:none}
-#bar button{background:#374151;color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:14px;flex:none}
-#bar button.on{background:#2563eb}
-#bar i{width:1px;height:26px;background:#4b5563;flex:none}
+#bar{display:flex;flex-direction:column;gap:8px;padding:8px;background:#0b1220;flex:none;max-height:46vh;overflow-y:auto}
+#bar.h,#bar[hidden]{display:none}
+.bx{background:#162033;border:1px solid #2b3a55;border-radius:16px;padding:8px 10px 10px;box-shadow:0 2px 10px #0006}
+.bx h3{margin:0 2px 8px;font-size:13px;color:#7dd3c8;font-weight:700}
+.tl{display:flex;gap:6px}
+.tl button{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:9px 2px;border:0;border-radius:12px;background:#2a3a57;color:#fff}
+.tl button b{font-size:22px;line-height:1;font-weight:400}
+.tl button small{font-size:11px;font-weight:700;white-space:nowrap}
+.tl button.on{background:#2563eb;box-shadow:0 0 0 2px #93c5fd inset}
+.tl button.sv{background:#0f766e}
+.cw{display:flex;align-items:center;gap:12px;margin-top:10px;padding:0 4px}
+#showbar{background:#0f766e;color:#fff;border:0;padding:8px;font-size:14px;font-weight:700;flex:none}
 #cols{display:flex;gap:5px;flex:none}
 #cols b{width:28px;height:28px;border-radius:50%;border:3px solid #374151;flex:none}
 #cols b.on{border-color:#fff}
-#wd{width:80px;flex:none}
+#wd{flex:1;min-width:0}
 #panes{flex:1;display:flex;min-height:0}
 .pane{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;border:2px solid transparent;background:#6b7280}
 .pane.act{border-color:#2563eb}
@@ -69,7 +82,6 @@ body{display:flex;flex-direction:column}
 .dv{flex:none;background:#0f172a;touch-action:none}
 #panes.row>.dv{width:12px;cursor:col-resize}
 #panes.column>.dv{height:12px;cursor:row-resize}
-#bar button.sv{background:#0f766e}
 #fabs{position:fixed;left:14px;bottom:18px;display:flex;flex-direction:column;gap:10px;align-items:center;z-index:50}
 .fab{border:0;border-radius:50%;width:52px;height:52px;font-size:22px;background:#374151;color:#fff;box-shadow:0 4px 14px #0008}
 .fab.main{width:72px;height:72px;background:#0f766e;font-size:26px;line-height:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
@@ -350,10 +362,12 @@ document.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
   if (a === 'open') fileIn.click();
   if (a === 'draft') addPane('draft', 'مسودة', [{ w: A4[0], h: A4[1], strokes: [] }]);
   if (a === 'nb') addPane('nb', 'نوت بوك', [{ w: A4[0], h: A4[1], strokes: [] }]);
-  if (a === 'finger') { S.finger = !S.finger; b.textContent = '☝️ إصبع: ' + (S.finger ? 'نعم' : 'لا'); b.classList.toggle('on', S.finger); }
+  if (a === 'finger') { S.finger = !S.finger; b.querySelector('small').textContent = 'إصبع: ' + (S.finger ? 'نعم' : 'لا'); b.classList.toggle('on', S.finger); }
   if (a === 'undo') undo();
   if (a === 'save') savePane(false);
   if (a === 'share') savePane(true);
+  if (a === 'hide') { $('#bar').classList.add('h'); $('#showbar').hidden = false; }
+  if (a === 'show') { $('#bar').classList.remove('h'); $('#showbar').hidden = true; }
   if (a === 'orient') { S.orient = S.orient === 'column' ? 'row' : 'column'; layoutPanes(); autosave(); }
   if (a === 'fs') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => { }); }
 });
