@@ -1,0 +1,58 @@
+name: Build Khotati Plan APK
+on:
+  push:
+    branches: [main]
+    paths: ['khotati-plan/**', '.github/workflows/khotati-plan.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: write
+defaults:
+  run:
+    working-directory: khotati-plan
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: mkdir www && cp web/* www/
+      - run: npm install
+      - run: npx cap add android
+      - name: Icons and version
+        run: |
+          pip install pillow
+          python3 make_icons.py
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.${{ github.run_number }}\"/" android/app/build.gradle
+      - run: npx cap sync android
+      - name: Build release APK
+        run: cd android && for i in 1 2 3; do ./gradlew assembleRelease --no-daemon && break; echo retry $i; sleep 45; done; test -f app/build/outputs/apk/release/app-release-unsigned.apk
+      - name: Align and sign
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASS }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > ks.jks; PASS="$KS_PASS"
+          else
+            PASS=$(openssl rand -hex 12)
+            keytool -genkeypair -keystore ks.jks -alias pen -keyalg RSA -keysize 2048 -validity 12000 -storepass "$PASS" -keypass "$PASS" -dname "CN=Khotati Plan, O=Personal"
+          fi
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -p -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          "$BT/apksigner" sign --ks ks.jks --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --ks-key-alias pen --out Khotati.apk aligned.apk
+          "$BT/apksigner" verify Khotati.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Khotati-apk
+          path: khotati-plan/Khotati.apk
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "khotati-plan-v1.${{ github.run_number }}" Khotati.apk --title "Khotati Plan v1.${{ github.run_number }}" --notes "APK خطتي" --latest=false
