@@ -1,3 +1,4 @@
+import HERO from './hero.js';
 import * as pdfjs from 'pdfjs-dist/build/pdf.min.mjs';
 import { PDFDocument, rgb, LineCapStyle } from 'pdf-lib';
 import workerText from './worker.js';
@@ -42,6 +43,7 @@ document.body.innerHTML = `
   <button data-a="orient"><b>⇅</b><small>تقسيم</small></button>
   <button data-a="fs"><b>⛶</b><small>ملء الشاشة</small></button>
   <button data-a="hide"><b>▲</b><small>إخفاء الأدوات</small></button>
+  <button data-a="about"><b><img class="av" alt=""></b><small>الرئيسية</small></button>
  </div></section>
 </div>
 <button id="showbar" data-a="show" hidden>▼ إظهار الأدوات</button>
@@ -92,8 +94,22 @@ html.native #toast{bottom:calc(max(env(safe-area-inset-bottom),34px) + 120px)}
 .fab.main span{font-size:12px;font-weight:700;margin-top:2px}
 #toast{bottom:110px;max-width:90%;text-align:center;white-space:pre-line}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000c;color:#fff;padding:10px 16px;border-radius:10px;opacity:0;transition:.3s;pointer-events:none;font-size:14px}
-#toast.s{opacity:1}`;
+#toast.s{opacity:1}
+.av{width:28px;height:28px;border-radius:50%;object-fit:cover;object-position:50% 20%;display:block;border:2px solid #93c5fd}
+#splash{position:fixed;inset:0;z-index:999;background:#0b1220;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;transition:opacity .5s}
+#splash.o{opacity:0;pointer-events:none}
+#splash img{width:min(94vw,78vh);max-height:78vh;aspect-ratio:1/1.04;object-fit:cover;object-position:50% 20%;border-radius:24px;box-shadow:0 10px 40px #000a;border:1px solid #2b3a55}
+#splash b{color:#fff;font-size:26px;letter-spacing:.5px}#splash small{color:#93a3bf;font-size:14px}`;
 document.head.appendChild(st);
+document.querySelectorAll('.av').forEach(i => { i.src = HERO; });
+function splash(auto) {
+  const d = document.createElement('div'); d.id = 'splash';
+  d.innerHTML = `<img src="${HERO}" alt=""><b>Engineer Pen</b><small>اضغط للدخول</small>`;
+  document.body.appendChild(d);
+  const close = () => { d.classList.add('o'); setTimeout(() => d.remove(), 600); };
+  d.onclick = close; if (auto) setTimeout(close, 2600);
+}
+splash(true);
 const toast = m => { const t = $('#toast'); t.textContent = m; t.classList.add('s'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('s'), 5000); };
 COLORS.forEach((c, i) => { const b = document.createElement('b'); b.style.background = c; if (!i) b.className = 'on'; b.onclick = () => { S.color = c; [...$('#cols').children].forEach(x => x.classList.toggle('on', x === b)); if (S.tool === 'er') setTool('pen'); }; $('#cols').appendChild(b); });
 $('#wd').oninput = e => S.width = e.target.value * 0.00095;
@@ -370,6 +386,7 @@ document.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
   if (a === 'undo') undo();
   if (a === 'save') savePane(false);
   if (a === 'share') savePane(true);
+  if (a === 'about') splash(false);
   if (a === 'hide') { $('#bar').classList.add('h'); $('#showbar').hidden = false; }
   if (a === 'show') { $('#bar').classList.remove('h'); $('#showbar').hidden = true; }
   if (a === 'orient') { S.orient = S.orient === 'column' ? 'row' : 'column'; layoutPanes(); autosave(); }
