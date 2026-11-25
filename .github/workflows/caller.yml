@@ -47,7 +47,7 @@ jobs:
           sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.${{ github.run_number }}\"/" android/app/build.gradle
       - run: npx cap sync android
       - name: Build release APK
-        run: cd android && ./gradlew assembleRelease --no-daemon
+        run: cd android && for i in 1 2 3; do ./gradlew assembleRelease --no-daemon && break; echo retry $i; sleep 45; done; test -f app/build/outputs/apk/release/app-release-unsigned.apk
       - name: Align and sign
         env:
           KS_B64: ${{ secrets.KEYSTORE_B64 }}
