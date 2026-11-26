@@ -42,17 +42,23 @@ export const makeText = (g, text, x, y, o = {}) => {
 };
 
 /* ---------- storage ---------- */
+import { initRepoSync, hasLink, linkInfo, link as rsLink, unlink as rsUnlink } from './rsync.js';
+export const REVIEW = typeof APP_MODE !== 'undefined' && APP_MODE === 'review';
+const DT = typeof window !== 'undefined' ? window.desktop : null;
+let RS = null, mirrored = new Set();
 let api = null;
-const D = { projects: [], files: {}, stamps: [], cfg: { key: '', model: 'claude-sonnet-5-5', style: 'typed', disc: 'both' } };
+const D = { projects: [], files: {}, stamps: [], gone: {}, cfg: { key: '', model: 'claude-sonnet-5-5', style: 'typed', disc: 'both' } };
 const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
 const GROUPS = [['lighting', 'إنارة شوارع وشبكات جهد متوسط'], ['buildings', 'مشاريع مباني كهرباء'], ['private', 'مشاريع خاصة كهرباء وميكانيكا']];
 const SEED = { lighting: ['بنيان نجد', 'الصندوق', 'موان', 'اشبيلية', 'تلال الوصيل'], buildings: ['مدن'], private: ['مستودع السلى', 'فيلا عوض', 'مسجد حريملاء', 'فيلا الكنانى'] };
-const save = () => api.kvSet('pj:data', D);
+const save = skip => { const r = api.kvSet('pj:data', D); if (!skip && RS) RS.soon(); return r; };
+const bury = id => { D.gone[id] = Date.now(); };
 async function load() {
   const d = await api.kvGet('pj:data');
   if (d && d.projects) Object.assign(D, d, { cfg: Object.assign({}, D.cfg, d.cfg) });
-  else { GROUPS.forEach(([g]) => SEED[g].forEach(n => D.projects.push({ id: uid(), name: n, group: g }))); await save(); }
-  D.projects.forEach(p => { D.files[p.id] = D.files[p.id] || { ref: [], in: [], out: [] }; });
+  else { GROUPS.forEach(([g]) => SEED[g].forEach((n, i) => D.projects.push({ id: 's_' + g + i, name: n, group: g }))); await save(); }
+  D.gone = D.gone || {}; D.projects.forEach(p => { D.files[p.id] = D.files[p.id] || { ref: [], in: [], out: [] }; });
+  mirrored = new Set((await api.kvGet('pj:mir')) || []);
 }
 const sizeTxt = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -61,12 +67,14 @@ async function addFile(pid, sec, f) {
   const bytes = await f.arrayBuffer(), id = uid();
   await api.kvSet('pjf:' + id, bytes);
   D.files[pid][sec].push({ id, name: f.name, size: bytes.byteLength, type: f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : ''), t: Date.now() });
+  mirrorOne(pid, sec, f.name, id, bytes);
 }
 export async function addOutput(pid, name, u8) {
   const id = uid(); await api.kvSet('pjf:' + id, u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
   const L = D.files[pid].out, i = L.findIndex(x => x.name === name);
-  if (i >= 0) { api.kvSet('pjf:' + L[i].id, null); L.splice(i, 1); }
+  if (i >= 0) { api.kvSet('pjf:' + L[i].id, null); bury(L[i].id); L.splice(i, 1); }
   L.push({ id, name, size: u8.byteLength, type: 'application/pdf', t: Date.now() }); await save();
+  mirrorOne(pid, 'out', name, id, u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
 }
 
 /* ---------- stamps & signatures ---------- */
@@ -123,6 +131,22 @@ html.native #pj{padding-top:max(env(safe-area-inset-top),40px);padding-bottom:ma
 #pjm label{display:block;font-size:13px;color:#9fb3c8;margin-top:8px}
 #pjm select,#pjm textarea,#pjm input{width:100%;background:#0b1220;color:#fff;border:1px solid #34476a;border-radius:10px;padding:10px;font-size:15px;margin:4px 0;font-family:inherit}
 #pjm .st{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}#pjm .st div{background:#fff;border-radius:10px;padding:6px;text-align:center;color:#000;font-size:12px;cursor:pointer}#pjm .st img{max-width:100%;max-height:70px}`;
+  if (REVIEW) st.textContent += `
+#pj{background:#eef1f6;color:#0f172a}
+#pj .hd{background:#fff;border-bottom:1px solid #d5dbe6}
+#pj button{background:#e2e8f0;color:#0f172a}
+#pj button.g{background:#0f766e;color:#fff}#pj button.b{background:#2563eb;color:#fff}#pj button.r{background:#be123c;color:#fff}
+#pj h3{color:#0f766e}
+#pj .gr button{background:#fff;border:1px solid #d5dbe6;box-shadow:0 1px 2px #0001}
+#pj .gr button.g{background:#0f766e;border-color:#0f766e;color:#fff}
+#pj .tb button.on{background:#2563eb;color:#fff}
+#pj .rw{background:#fff;border-color:#d5dbe6}#pj .rw small,#pj .sm{color:#64748b}
+#pj input[type=text],#pj input[type=password],#pj textarea,#pj select{background:#fff;color:#0f172a;border-color:#cbd5e1}
+#pjm .bx{background:#fff;border-color:#d5dbe6;color:#0f172a}
+#pjm button{background:#e2e8f0;color:#0f172a}#pjm button.g{background:#0f766e;color:#fff}
+#pjm label{color:#475569}
+#pjm select,#pjm textarea,#pjm input{background:#fff;color:#0f172a;border-color:#cbd5e1}
+#pjm .sm{color:#64748b}`;
   document.head.appendChild(st);
 }
 function modal(html) {
@@ -136,16 +160,55 @@ function modal(html) {
   });
 }
 
+
+/* ---------- ربط الفولدرات (الكمبيوتر فقط) ---------- */
+const SECN = { ref: 'مراجع', in: 'مدخلات', out: 'مخرجات' };
+const pname = pid => (D.projects.find(x => x.id === pid) || {}).name || pid;
+async function mirrorOne(pid, sec, name, id, buf) {
+  if (!DT) return;
+  try { await DT.write(pid, pname(pid), SEC_K(sec), name, buf); mirrored.add(id); api.kvSet('pj:mir', [...mirrored]); } catch (e) { }
+}
+const SEC_K = sec => SECN[sec];
+let fsBusy = false;
+async function folderSync(quiet) {
+  if (!DT || fsBusy) return; fsBusy = true; let imp = 0;
+  try {
+    if (!(await DT.getRoot())) return;
+    for (const p of D.projects) {
+      const F = D.files[p.id]; if (!F) continue;
+      for (const sec of ['ref', 'in', 'out']) for (const f of F[sec]) if (!mirrored.has(f.id)) { const b = await api.kvGet('pjf:' + f.id); if (b) await mirrorOne(p.id, sec, f.name, f.id, b); }
+      const list = await DT.scan(p.id, p.name);
+      for (const it of list) {
+        const sec = Object.keys(SECN).find(k => SECN[k] === it.sec); if (!sec) continue;
+        const ex = F[sec].find(x => x.name === it.name);
+        if (ex && (ex.size === it.size || it.mtime <= ex.t + 3000)) continue;
+        const buf = await DT.read(p.id, p.name, it.sec, it.name); if (!buf) continue;
+        const id = uid(); await api.kvSet('pjf:' + id, buf);
+        if (ex) { api.kvSet('pjf:' + ex.id, null); bury(ex.id); F[sec].splice(F[sec].indexOf(ex), 1); }
+        F[sec].push({ id, name: it.name, size: buf.byteLength, type: /\.pdf$/i.test(it.name) ? 'application/pdf' : /\.(png|jpe?g)$/i.test(it.name) ? 'image/' + (/png$/i.test(it.name) ? 'png' : 'jpeg') : 'text/plain', t: Date.now() });
+        mirrored.add(id); imp++;
+      }
+    }
+    if (imp) { await save(); api.kvSet('pj:mir', [...mirrored]); if (!root.hidden) cur.pid ? project(cur.pid) : home(); if (!quiet) api.toast('📥 دخل ' + imp + ' ملف من الفولدرات'); }
+  } catch (e) { } finally { fsBusy = false; }
+}
+async function pickRootFlow() {
+  const r = await DT.pickRoot(); if (r) { mirrored.clear(); await api.kvSet('pj:mir', []); api.toast('✔ الفولدر الرئيسي: ' + r); await folderSync(true); }
+  return r;
+}
+
 /* ---------- screens ---------- */
 let cur = { pid: null, sec: 'in' };
 const SEC = { ref: '📚 المراجع', in: '📥 المدخلات', out: '📤 المخرجات' };
 function home() {
   cur.pid = null;
-  root.innerHTML = `<div class="hd"><h2>🗂 مراجعة المشاريع</h2><button data-h="stamps">🖋 أختام وتوقيعات</button><button data-h="cfg">⚙</button><button class="r" data-h="x">✕</button></div><div class="bd">${GROUPS.map(([g, n]) => `<h3>${n}</h3><div class="gr">${D.projects.filter(p => p.group === g).map(p => `<button data-p="${p.id}">${esc(p.name)}</button>`).join('')}<button class="g" data-add="${g}">＋ مشروع</button></div>`).join('')}</div>`;
+  root.innerHTML = `<div class="hd"><h2>🗂 مراجعة المشاريع</h2><button data-h="sync" title="مزامنة">🔄</button>${DT ? '<button data-h="rootf" title="الفولدر الرئيسي">📁</button>' : ''}<button data-h="stamps">🖋 أختام</button><button data-h="cfg">⚙</button>${REVIEW ? '<button class="b" data-h="x">📄 المحرر</button>' : '<button class="r" data-h="x">✕</button>'}</div><div class="bd">${!hasLink() ? '<div class="rw" style="background:#fff7e0;border-color:#f0c040;color:#5b4300"><span>⚠ الجهاز مش مربوط — اربطه علشان المشاريع تظهر على الجوال واللابتوب</span><button class="g" data-h="cfg">اربط</button></div>' : ''}${GROUPS.map(([g, n]) => `<h3>${n}</h3><div class="gr">${D.projects.filter(p => p.group === g).map(p => `<button data-p="${p.id}">${esc(p.name)}</button>`).join('')}<button class="g" data-add="${g}">＋ مشروع</button></div>`).join('')}</div>`;
   root.querySelectorAll('[data-p]').forEach(b => b.onclick = () => project(b.dataset.p));
-  root.querySelectorAll('[data-add]').forEach(b => b.onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text"><button class="g" data-ok>إضافة</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { const p = { id: uid(), name: r.n.trim(), group: b.dataset.add }; D.projects.push(p); D.files[p.id] = { ref: [], in: [], out: [] }; await save(); home(); } });
+  root.querySelectorAll('[data-add]').forEach(b => b.onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text"><button class="g" data-ok>إضافة</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { const p = { id: uid(), name: r.n.trim(), group: b.dataset.add, t: Date.now() }; D.projects.push(p); D.files[p.id] = { ref: [], in: [], out: [] }; await save(); home(); } });
   root.querySelector('[data-h=x]').onclick = () => { root.hidden = true; };
-  root.querySelector('[data-h=cfg]').onclick = settings;
+  root.querySelectorAll('[data-h=cfg]').forEach(b => b.onclick = settings);
+  root.querySelector('[data-h=sync]').onclick = () => RS && RS.run(true).then(() => home());
+  const rb = root.querySelector('[data-h=rootf]'); if (rb) rb.onclick = async () => { const cur0 = await DT.getRoot(); const r = await modal(`<h3 style="margin:0 0 8px">📁 الفولدر الرئيسي</h3><div class="sm">${cur0 ? esc(cur0) : 'لسه ما اخترتش'}<br>كل مشروع بيتعمله فولدر جواه بنفس اسمه (مراجع / مدخلات / مخرجات). تقدر تربط أي مشروع بفولدر تاني من جوّه المشروع.</div><button class="g" data-x="pick">اختيار / تغيير الفولدر</button><button data-x="">إغلاق</button>`); if (r === 'pick') await pickRootFlow(); home(); };
   root.querySelector('[data-h=stamps]').onclick = stampsScreen;
 }
 function project(pid, sec) {
@@ -153,13 +216,20 @@ function project(pid, sec) {
   root.innerHTML = `<div class="hd"><button data-h="back">→</button><h2>${esc(p.name)}</h2><button data-h="ren">✎</button><button class="r" data-h="del">🗑</button></div><div class="bd">
   <div class="tb">${Object.entries(SEC).map(([k, n]) => `<button data-s="${k}" class="${k === cur.sec ? 'on' : ''}">${n} (${D.files[pid][k].length})</button>`).join('')}</div>
   <div class="sm">${cur.sec === 'ref' ? 'ملفات مرجعية (مواصفات، BOQ، مخططات معتمدة، كود) — الذكاء بيراجع على أساسها.' : cur.sec === 'in' ? 'تقارير ومخططات المقاول اللي عاوز تراجعها.' : 'الملفات اللي اتكتب عليها (PDF).'}</div>
+  ${DT ? '<div class="rw" id="pjfold"><span>📁 <small id="pjpath">…</small></span><button data-h="fopen">فتح</button><button data-h="fpick">ربط فولدر</button><button data-h="fscan">🔄</button></div>' : ''}
   <button class="g" data-up="1" style="width:100%;margin-bottom:10px">＋ رفع ملفات</button>
   ${L.length ? L.map(f => `<div class="rw"><span>${/pdf/i.test(f.type) ? '📄' : /image/.test(f.type) ? '🖼' : '📝'} ${esc(f.name)}<br><small>${sizeTxt(f.size)} • ${new Date(f.t).toLocaleDateString('ar-SA')}</small></span>
    ${/pdf/i.test(f.type) ? `<button data-o="${f.id}">فتح</button>` : ''}${cur.sec === 'in' && /pdf/i.test(f.type) ? `<button class="b" data-rv="${f.id}">🤖 راجع</button>` : ''}${cur.sec === 'out' ? `<button data-sh="${f.id}">📤</button>` : ''}<button class="r" data-d="${f.id}">🗑</button></div>`).join('') : '<div class="sm">لا يوجد ملفات بعد.</div>'}</div>
   <input type="file" id="pjup" multiple hidden>`;
   root.querySelector('[data-h=back]').onclick = home;
-  root.querySelector('[data-h=ren]').onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text" value="${esc(p.name)}"><button class="g" data-ok>حفظ</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { p.name = r.n.trim(); await save(); project(pid); } };
-  root.querySelector('[data-h=del]').onclick = async () => { if (confirm('حذف المشروع «' + p.name + '» وكل ملفاته؟')) { for (const k of ['ref', 'in', 'out']) for (const f of D.files[pid][k]) api.kvSet('pjf:' + f.id, null); D.projects = D.projects.filter(x => x.id !== pid); delete D.files[pid]; await save(); home(); } };
+  if (DT) {
+    DT.folder(pid, p.name).then(f => { const e = root.querySelector('#pjpath'); if (e) e.textContent = f || 'اختار الفولدر الرئيسي الأول (📁 من الشاشة الرئيسية)'; });
+    root.querySelector('[data-h=fopen]').onclick = () => DT.open(pid, p.name);
+    root.querySelector('[data-h=fpick]').onclick = async () => { const r = await DT.pickFolder(pid, p.name); if (r) { for (const k of ['ref', 'in', 'out']) D.files[pid][k].forEach(f => mirrored.delete(f.id)); await folderSync(); project(pid); } };
+    root.querySelector('[data-h=fscan]').onclick = async () => { await folderSync(); project(pid); api.toast('تم فحص الفولدر'); };
+  }
+  root.querySelector('[data-h=ren]').onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text" value="${esc(p.name)}"><button class="g" data-ok>حفظ</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { p.name = r.n.trim(); p.t = Date.now(); await save(); project(pid); } };
+  root.querySelector('[data-h=del]').onclick = async () => { if (confirm('حذف المشروع «' + p.name + '» وكل ملفاته؟')) { for (const k of ['ref', 'in', 'out']) for (const f of D.files[pid][k]) api.kvSet('pjf:' + f.id, null); bury(pid); for (const k of ['ref', 'in', 'out']) D.files[pid][k].forEach(f => bury(f.id)); D.projects = D.projects.filter(x => x.id !== pid); delete D.files[pid]; await save(); home(); } };
   root.querySelectorAll('[data-s]').forEach(b => b.onclick = () => project(pid, b.dataset.s));
   const up = root.querySelector('#pjup'); up.accept = cur.sec === 'ref' ? '.pdf,.txt,.md,.png,.jpg,.jpeg,.csv' : 'application/pdf';
   root.querySelector('[data-up]').onclick = () => up.click();
@@ -167,7 +237,7 @@ function project(pid, sec) {
   root.querySelectorAll('[data-o]').forEach(b => b.onclick = () => openFile(pid, b.dataset.o));
   root.querySelectorAll('[data-rv]').forEach(b => b.onclick = () => reviewFlow(pid, b.dataset.rv));
   root.querySelectorAll('[data-sh]').forEach(b => b.onclick = async () => { const f = L.find(x => x.id === b.dataset.sh); api.deliver(new Uint8Array(await api.kvGet('pjf:' + f.id)), f.name.replace(/\.pdf$/i, ''), true); });
-  root.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => { const i = L.findIndex(x => x.id === b.dataset.d); if (confirm('حذف «' + L[i].name + '»؟')) { api.kvSet('pjf:' + L[i].id, null); L.splice(i, 1); await save(); project(pid); } });
+  root.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => { const i = L.findIndex(x => x.id === b.dataset.d); if (confirm('حذف «' + L[i].name + '»؟')) { api.kvSet('pjf:' + L[i].id, null); bury(L[i].id); L.splice(i, 1); await save(); project(pid); } });
 }
 async function openFile(pid, fid) {
   const sec = ['ref', 'in', 'out'].find(k => D.files[pid][k].some(f => f.id === fid)), f = D.files[pid][sec].find(x => x.id === fid), bytes = await api.kvGet('pjf:' + fid);
@@ -179,12 +249,16 @@ function settings() {
   root.innerHTML = `<div class="hd"><button data-h="back">→</button><h2>⚙ إعدادات المراجعة</h2></div><div class="bd">
   <label>مفتاح Claude API</label><input type="password" id="k" value="${esc(c.key)}" placeholder="sk-ant-..." autocomplete="off">
   <div class="sm">المفتاح بيتحفظ على الجهاز ده بس (مش بيتزامن ولا بيترفع). كل مراجعة بتتحاسب عليك حسب الاستخدام من حسابك في Anthropic. لازم نت وقت المراجعة بس.</div>
+  <h3>🔗 الربط بين الجوال واللابتوب</h3>
+  ${hasLink() ? `<div class="sm">✔ مربوط بالمستودع الخاص: <b>${esc(linkInfo().repo)}</b>${linkInfo().last ? '<br>آخر مزامنة: ' + new Date(linkInfo().last).toLocaleString('ar-SA') : ''}</div><button data-h="unlink">فك الربط من الجهاز ده</button>` : `<div class="sm">ادخل توكن GitHub مرة واحدة على كل جهاز (صلاحية Contents قراءة وكتابة على المستودع الخاص، أو repo للتوكن الكلاسيكي). البرنامج بينشئ مستودع خاص باسم mashari3-data لو مش موجود. الملفات والمشاريع بتتخزن هناك غير مشفّرة (المستودع خاص ليك بس).</div><input type="password" id="gt" placeholder="github_pat_… أو ghp_…" autocomplete="off"><input type="text" id="gr" value="mashari3-data"><button class="g" data-h="lnk">ربط الجهاز</button>`}
   <label>الموديل</label><input type="text" id="m" value="${esc(c.model)}">
   <label>طريقة كتابة الملاحظات</label><select id="s"><option value="typed">مطبوعة (كأنها مكتوبة على الكمبيوتر)</option><option value="hand">خط يد (كأنها مكتوبة بالقلم)</option></select>
   <label>التخصص</label><select id="d"><option value="both">كهرباء وميكانيكا</option><option value="elec">كهرباء</option><option value="mech">ميكانيكا</option></select>
   <button class="g" data-h="ok" style="width:100%;margin-top:12px">حفظ</button></div>`;
   root.querySelector('#s').value = c.style; root.querySelector('#d').value = c.disc;
   root.querySelector('[data-h=back]').onclick = home;
+  const ul = root.querySelector('[data-h=unlink]'); if (ul) ul.onclick = () => { rsUnlink(); settings(); };
+  const lk = root.querySelector('[data-h=lnk]'); if (lk) lk.onclick = async () => { lk.disabled = true; lk.textContent = '⏳ جارٍ الربط…'; try { const r = await rsLink(root.querySelector('#gt').value, root.querySelector('#gr').value); api.toast('✔ اتربط بـ ' + r); await RS.run(true); settings(); } catch (e) { api.toast('❌ ' + e.message); lk.disabled = false; lk.textContent = 'ربط الجهاز'; } };
   root.querySelector('[data-h=ok]').onclick = async () => { c.key = root.querySelector('#k').value.trim(); c.model = root.querySelector('#m').value.trim() || 'claude-sonnet-5-5'; c.style = root.querySelector('#s').value; c.disc = root.querySelector('#d').value; api.S.nstyle = c.style; await save(); api.toast('اتحفظ ✔'); home(); };
 }
 function stampsScreen() {
@@ -195,7 +269,7 @@ function stampsScreen() {
   root.querySelector('[data-h=back]').onclick = home;
   const up = root.querySelector('#su'); root.querySelector('[data-up]').onclick = () => up.click();
   up.onchange = async () => { try { for (const f of up.files) await addStamp(f); api.toast('اتضاف ✔'); } catch (e) { api.toast('تعذر: ' + e.message); } stampsScreen(); };
-  root.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => { D.stamps = D.stamps.filter(s => s.id !== b.dataset.d); await save(); stampsScreen(); });
+  root.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => { bury(b.dataset.d); D.stamps = D.stamps.filter(s => s.id !== b.dataset.d); await save(); stampsScreen(); });
 }
 export async function pickStamp() {
   if (!D.stamps.length) { api.toast('ارفع ختم أو توقيع الأول من «🗂 مشاريع ← أختام»'); return null; }
@@ -309,5 +383,8 @@ async function reviewFlow(pid, fid) {
 export async function initProj(a) {
   api = a; css(); await load(); a.S.nstyle = D.cfg.style;
   root = document.createElement('div'); root.id = 'pj'; root.hidden = true; document.body.appendChild(root);
+  RS = initRepoSync({ D, save, kvGet: k => api.kvGet(k), kvSet: (k, v) => api.kvSet(k, v), toast: m => api.toast(m), rerender: () => { if (!root.hidden) cur.pid ? project(cur.pid) : home(); }, after: () => folderSync(true) });
+  if (DT) { addEventListener('focus', () => folderSync(true)); setTimeout(async () => { if (!(await DT.getRoot())) { const r = await modal(`<h3 style="margin:0 0 8px">📁 فولدر المشاريع على الكمبيوتر</h3><div class="sm">اختار فولدر (مثلاً على D: مش C:). هيتعمل جواه فولدر لكل مشروع، وأي ملف تضيفه أو تعدّله في البرنامج بيتكتب فيه تلقائي، وأي ملف تحطه في الفولدر بيظهر في البرنامج.</div><button class="g" data-x="pick">اختيار الفولدر</button><button data-x="">بعدين</button>`); if (r === 'pick') await pickRootFlow(); } else folderSync(true); }, 1200); }
+  if (hasLink()) setTimeout(() => RS.run(false), 2500);
   return { open: () => { root.hidden = false; cur.pid ? project(cur.pid) : home(); }, addOutput, pickStamp };
 }

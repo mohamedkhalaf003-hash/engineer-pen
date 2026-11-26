@@ -1,7 +1,7 @@
 import HERO from './hero.js';
 import { initSync } from './sync.js';
 import { strokesToCanvas, recognize } from './ocr.js';
-import { initProj, stampImg, stampData, fitText, makeText, wrap, fontOf, fontsReady } from './proj.js';
+import { REVIEW, initProj, stampImg, stampData, fitText, makeText, wrap, fontOf, fontsReady } from './proj.js';
 import * as pdfjs from 'pdfjs-dist/build/pdf.min.mjs';
 import { PDFDocument, rgb, LineCapStyle } from 'pdf-lib';
 import workerText from './worker.js';
@@ -22,7 +22,7 @@ async function kvSet(k, v) { try { const db = await idb(); db.transaction('kv', 
 async function kvGet(k) { try { const db = await idb(); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => r(q.result); q.onerror = () => r(null); }); } catch (e) { return null; } }
 let DIRTY = false, READY = false, PJ = null;
 const snap = () => ({ orient: S.orient, panes: S.panes.map(p => ({ kind: p.kind, name: p.name, proj: p.proj || null, bytes: p.bytes || null, zoom: p.zoom, pages: p.pages.map(g => ({ w: g.w, h: g.h, strokes: g.strokes })) })) });
-const sy = initSync({ snapshot: snap, kvGet, kvSet, toast: m => toast(m) });
+const sy = REVIEW ? { touch() { }, soon() { }, applying: false, setup() { } } : initSync({ snapshot: snap, kvGet, kvSet, toast: m => toast(m) });
 let saveT; const autosave = () => { if (READY) { DIRTY = true; sy.touch(); } clearTimeout(saveT); saveT = setTimeout(persist, 900); };
 function persist() {
   if (sy.applying) return;
@@ -122,6 +122,17 @@ html.native #toast{bottom:calc(max(env(safe-area-inset-bottom),34px) + 120px)}
 #splash.o{opacity:0;pointer-events:none}
 #splash img{width:min(94vw,78vh);max-height:78vh;aspect-ratio:1/1.04;object-fit:cover;object-position:50% 20%;border-radius:24px;box-shadow:0 10px 40px #000a;border:1px solid #2b3a55}
 #splash b{color:#fff;font-size:26px;letter-spacing:.5px}#splash small{color:#93a3bf;font-size:14px}`;
+if (REVIEW) st.textContent += `
+html,body{background:#eef1f6}
+#bar{background:#fff;border-bottom:1px solid #d5dbe6}
+#bar .bx h3{color:#475569}
+#bar button{background:#f1f5f9!important;color:#0f172a!important;border:1px solid #d5dbe6!important;box-shadow:none!important}
+#bar button.on{background:#dbeafe!important;border-color:#2563eb!important}
+#bar button.sv{background:#e6f4f1!important}
+#showbar{background:#fff!important;color:#0f172a!important}
+.pane{background:#dfe4ec}
+#toast{background:#0f172ae6}
+[data-a=about],[data-a=sync],[data-a=mode],[data-a=lang],[data-a=nb]{display:none!important}`;
 document.head.appendChild(st);
 document.querySelectorAll('.av').forEach(i => { i.src = HERO; });
 function splash(auto) {
@@ -131,7 +142,7 @@ function splash(auto) {
   const close = () => { d.classList.add('o'); setTimeout(() => d.remove(), 600); };
   d.onclick = close; if (auto) setTimeout(close, 2600);
 }
-splash(true);
+if (!REVIEW) splash(true);
 const toast = m => { const t = $('#toast'); t.textContent = m; t.classList.add('s'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('s'), 5000); };
 COLORS.forEach((c, i) => { const b = document.createElement('b'); b.style.background = c; if (!i) b.className = 'on'; b.onclick = () => { S.color = c; [...$('#cols').children].forEach(x => x.classList.toggle('on', x === b)); if (S.tool === 'er') setTool('pen'); }; $('#cols').appendChild(b); });
 $('#wd').oninput = e => S.width = e.target.value * 0.00095;
@@ -423,8 +434,8 @@ async function deliver(out, base, share) {
     b64 = btoa(b64);
     try {
       if (share) throw new Error('share');
-      await Filesystem.writeFile({ path: 'EngineerPen/' + base + '.pdf', data: b64, directory: Directory.Documents, recursive: true });
-      toast('✅ تم الحفظ في: الملفات ← Documents ← EngineerPen\n' + base + '.pdf');
+      await Filesystem.writeFile({ path: (REVIEW ? 'MashariReview/' : 'EngineerPen/') + base + '.pdf', data: b64, directory: Directory.Documents, recursive: true });
+      toast('✅ تم الحفظ في: الملفات ← Documents ← ' + (REVIEW ? 'MashariReview' : 'EngineerPen') + '\n' + base + '.pdf');
     } catch (e) {
       const r = await Filesystem.writeFile({ path: base + '.pdf', data: b64, directory: Directory.Cache });
       await Share.share({ title: base + '.pdf', files: [r.uri], dialogTitle: 'حفظ أو مشاركة PDF' });
@@ -510,15 +521,15 @@ window.addEventListener('beforeunload', persist);
 async function checkUpdate() {
   try {
     const cur = (await (await fetch('version.json', { cache: 'no-store' })).json()).v; if (!cur) return;
-    const el = /Electron/i.test(navigator.userAgent), pre = el ? 'engineerpen-desktop-v1.' : 'v1.';
+    const el = /Electron/i.test(navigator.userAgent), pre = REVIEW ? (el ? 'review-desktop-v1.' : 'review-v1.') : (el ? 'engineerpen-desktop-v1.' : 'v1.'), nm = REVIEW ? 'مراجعة مشاريع' : 'Engineer Pen';
     const rs = await (await fetch('https://api.github.com/repos/mohamedkhalaf003-hash/engineer-pen/releases?per_page=60')).json();
     let best = null; for (const r of rs) { if (!r.tag_name.startsWith(pre)) continue; const n = +r.tag_name.slice(pre.length); if (n > cur && (!best || n > best.n)) best = { n, r }; }
     if (!best) return; const as = best.r.assets.find(a => el ? /Setup\.exe$/.test(a.name) : /\.apk$/.test(a.name)); if (!as) return;
-    if (confirm('فيه تحديث جديد لـ Engineer Pen (نسخة ' + best.n + '). تنزيله وتثبيته فوق القديم دلوقتي؟ (شغلك محفوظ)')) window.open(as.browser_download_url, '_blank');
+    if (confirm('فيه تحديث جديد لـ ' + nm + ' (نسخة ' + best.n + '). تنزيله وتثبيته فوق القديم دلوقتي؟ (شغلك محفوظ)')) { if (el && window.desktop && window.desktop.update) { toast('⏳ جارٍ تنزيل التحديث…'); window.desktop.update(as.browser_download_url); } else if (REVIEW && /android/i.test(navigator.userAgent)) location.href = 'microsoft-edge:' + as.browser_download_url; else window.open(as.browser_download_url, '_blank'); }
   } catch (e) { }
 }
 setTimeout(checkUpdate, 6000);
-initProj({ S, toast: m => toast(m), kvGet, kvSet, openBytes, redraw: g => redrawInk(g), autosave, deliver }).then(x => { PJ = x; });
+initProj({ S, toast: m => toast(m), kvGet, kvSet, openBytes, redraw: g => redrawInk(g), autosave, deliver }).then(x => { PJ = x; if (REVIEW) setTimeout(() => x.open(), 300); });
 fontsReady.then(() => setTimeout(() => S.panes.forEach(q => q.pages.forEach(g => g.ink && redrawInk(g))), 600));
 (async () => {
   const s = await kvGet('state');

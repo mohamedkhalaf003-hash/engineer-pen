@@ -1,0 +1,38 @@
+name: Build Mashari3 Desktop (Windows)
+on:
+  push:
+    branches: [main]
+    paths: ['review/**', 'review-desktop/**', 'pdfjs/**', '.github/workflows/review-desktop.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: write
+defaults:
+  run:
+    working-directory: review-desktop
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - shell: bash
+        run: |
+          mkdir app
+          cp ../review/* app/
+          cp -r ../pdfjs app/pdfjs
+          echo '{"v":${{ github.run_number }}}' > app/version.json
+      - run: npm install
+      - run: npx electron-builder --win nsis --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mashari3-exe
+          path: review-desktop/dist/*.exe
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "review-desktop-v1.${{ github.run_number }}" dist/Mashari3-Setup.exe --title "مراجعة مشاريع - كمبيوتر v1.${{ github.run_number }}" --notes "برنامج مراجعة مشاريع لويندوز" --latest=false

@@ -2,7 +2,7 @@ name: Build Android APK
 on:
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'khotati-android/**', '.github/workflows/khotati.yml', 'mohamed-caller/**', 'khotati-plan/**', 'khotati-desktop/**', 'engineerpen-desktop/**', '.github/workflows/engineerpen-desktop.yml', '.github/workflows/khotati-desktop.yml', '.github/workflows/khotati-plan.yml', '.github/workflows/caller.yml']
+    paths-ignore: ['**.md', 'review/**', 'review-android/**', 'review-desktop/**', '.github/workflows/review-android.yml', '.github/workflows/review-desktop.yml', 'khotati-android/**', '.github/workflows/khotati.yml', 'mohamed-caller/**', 'khotati-plan/**', 'khotati-desktop/**', 'engineerpen-desktop/**', '.github/workflows/engineerpen-desktop.yml', '.github/workflows/khotati-desktop.yml', '.github/workflows/khotati-plan.yml', '.github/workflows/caller.yml']
   workflow_dispatch: {}
 permissions:
   contents: write
