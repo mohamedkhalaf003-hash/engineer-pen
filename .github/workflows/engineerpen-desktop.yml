@@ -1,0 +1,37 @@
+name: Build Engineer Pen Desktop (Windows)
+on:
+  push:
+    branches: [main]
+    paths: ['engineerpen-desktop/**', 'index.html', 'app.js', 'manifest.webmanifest', 'pdfjs/**', '.github/workflows/engineerpen-desktop.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: write
+defaults:
+  run:
+    working-directory: engineerpen-desktop
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - shell: bash
+        run: |
+          mkdir app
+          cp ../index.html ../app.js ../manifest.webmanifest ../icon-192.png ../icon-512.png app/
+          cp -r ../pdfjs app/pdfjs
+      - run: npm install
+      - run: npx electron-builder --win nsis --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EngineerPen-exe
+          path: engineerpen-desktop/dist/*.exe
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "engineerpen-desktop-v1.${{ github.run_number }}" dist/EngineerPen-Setup.exe --title "Engineer Pen Desktop v1.${{ github.run_number }}" --notes "Engineer Pen للكمبيوتر (Windows)" --latest=false
