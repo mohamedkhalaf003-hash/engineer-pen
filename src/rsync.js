@@ -34,8 +34,8 @@ export function initRepoSync(h) {
     for (const p of rem.projects || []) { const l = D.projects.find(x => x.id === p.id); if (!l) { if (!dead(p.id)) { D.projects.push(p); changed = true; } } else if ((p.t || 0) > (l.t || 0)) { Object.assign(l, p); changed = true; } }
     const before = D.projects.length; D.projects = D.projects.filter(p => !dead(p.id)); if (D.projects.length !== before) changed = true;
     for (const p of D.projects) {
-      const F = D.files[p.id] = D.files[p.id] || { ref: [], in: [], out: [] }, R = (rem.files || {})[p.id] || {};
-      for (const sec of ['ref', 'in', 'out']) {
+      const F = D.files[p.id] = D.files[p.id] || Object.fromEntries(h.secs.map(k => [k, []])), R = (rem.files || {})[p.id] || {};
+      for (const sec of h.secs) {
         for (const f of R[sec] || []) {
           if (dead(f.id)) continue;
           if (!F[sec].some(x => x.id === f.id)) {
@@ -64,7 +64,7 @@ export function initRepoSync(h) {
       /* الملفات: نزّل الناقص ورفّع اللي مش موجود عند الطرف التاني */
       const tr = await gh(`/repos/${repo}/git/trees/HEAD?recursive=1`, tok), tree = tr.ok ? (await tr.json()).tree || [] : [];
       const have = new Set(tree.map(x => x.path));
-      const ids = []; for (const p of h.D.projects) for (const sec of ['ref', 'in', 'out']) for (const f of h.D.files[p.id][sec]) ids.push(f.id);
+      const ids = []; for (const p of h.D.projects) for (const sec of h.secs) for (const f of h.D.files[p.id][sec]) ids.push(f.id);
       let up = 0, down = 0;
       for (const id of ids) {
         const local = await h.kvGet('pjf:' + id);

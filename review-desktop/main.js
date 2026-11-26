@@ -19,7 +19,7 @@ function serve(port) {
   });
 }
 /* ---- ربط الفولدرات ---- */
-const SECS = ['مراجع', 'مدخلات', 'مخرجات'], EXT = /\.(pdf|png|jpe?g|txt|md|csv)$/i;
+const SECS = ['مراجع', 'مدخلات', 'مخرجات', 'مستخلصات', 'جداول كميات', 'تقارير'], EXT = /\.(pdf|png|jpe?g|txt|md|csv|xlsx|xls)$/i;
 const cfgFile = () => path.join(app.getPath('userData'), 'folders.json');
 const cfg = () => { try { return Object.assign({ root: '', map: {} }, JSON.parse(fs.readFileSync(cfgFile(), 'utf8'))); } catch (e) { return { root: '', map: {} }; } };
 const saveCfg = c => { fs.mkdirSync(path.dirname(cfgFile()), { recursive: true }); fs.writeFileSync(cfgFile(), JSON.stringify(c)); };

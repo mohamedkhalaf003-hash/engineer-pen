@@ -42,9 +42,11 @@ export const makeText = (g, text, x, y, o = {}) => {
 };
 
 /* ---------- storage ---------- */
+import { PDFDocument } from 'pdf-lib';
 import { initRepoSync, hasLink, linkInfo, link as rsLink, unlink as rsUnlink } from './rsync.js';
 export const REVIEW = typeof APP_MODE !== 'undefined' && APP_MODE === 'review';
 const DT = typeof window !== 'undefined' ? window.desktop : null;
+const SECS = ['ref', 'in', 'out', 'ipc', 'boq', 'rep'];
 let RS = null, mirrored = new Set();
 let api = null;
 const D = { projects: [], files: {}, stamps: [], gone: {}, cfg: { key: '', model: 'claude-sonnet-5-5', style: 'typed', disc: 'both' } };
@@ -57,9 +59,10 @@ async function load() {
   const d = await api.kvGet('pj:data');
   if (d && d.projects) Object.assign(D, d, { cfg: Object.assign({}, D.cfg, d.cfg) });
   else { GROUPS.forEach(([g]) => SEED[g].forEach((n, i) => D.projects.push({ id: 's_' + g + i, name: n, group: g }))); await save(); }
-  D.gone = D.gone || {}; D.projects.forEach(p => { D.files[p.id] = D.files[p.id] || { ref: [], in: [], out: [] }; });
+  D.gone = D.gone || {}; D.projects.forEach(p => { const F = D.files[p.id] = D.files[p.id] || {}; SECS.forEach(k => { F[k] = F[k] || []; }); });
   mirrored = new Set((await api.kvGet('pj:mir')) || []);
 }
+const isPdf = f => /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name);
 const sizeTxt = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const b64 = u8 => { let s = ''; const C = 0x8000; for (let i = 0; i < u8.length; i += C) s += String.fromCharCode.apply(null, u8.subarray(i, i + C)); return btoa(s); };
@@ -69,12 +72,12 @@ async function addFile(pid, sec, f) {
   D.files[pid][sec].push({ id, name: f.name, size: bytes.byteLength, type: f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : ''), t: Date.now() });
   mirrorOne(pid, sec, f.name, id, bytes);
 }
-export async function addOutput(pid, name, u8) {
+export async function addOutput(pid, name, u8, sec = 'out') {
   const id = uid(); await api.kvSet('pjf:' + id, u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
-  const L = D.files[pid].out, i = L.findIndex(x => x.name === name);
+  const L = D.files[pid][sec], i = L.findIndex(x => x.name === name);
   if (i >= 0) { api.kvSet('pjf:' + L[i].id, null); bury(L[i].id); L.splice(i, 1); }
   L.push({ id, name, size: u8.byteLength, type: 'application/pdf', t: Date.now() }); await save();
-  mirrorOne(pid, 'out', name, id, u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
+  mirrorOne(pid, sec, name, id, u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
 }
 
 /* ---------- stamps & signatures ---------- */
@@ -116,7 +119,7 @@ html.native #pj{padding-top:max(env(safe-area-inset-top),40px);padding-bottom:ma
 #pj h3{margin:14px 2px 8px;color:#7dd3c8;font-size:14px}
 #pj .gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
 #pj .gr button{padding:16px 8px;font-size:16px;background:#1e2d47;border:1px solid #2b3a55}
-#pj .tb{display:flex;gap:6px;margin-bottom:10px}#pj .tb button{flex:1}#pj .tb button.on{background:#2563eb}
+#pj .tb{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}#pj .tb button{flex:1 1 30%;padding:10px 6px;font-size:14px}#pj .tb button.on{background:#2563eb}
 #pj .rw{display:flex;align-items:center;gap:6px;background:#162033;border:1px solid #2b3a55;border-radius:12px;padding:8px 10px;margin-bottom:8px}
 #pj .rw span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#pj .rw small{color:#93a3bf;font-size:11px}
 #pj .rw button{padding:7px 10px;font-size:13px}
@@ -162,7 +165,7 @@ function modal(html) {
 
 
 /* ---------- ربط الفولدرات (الكمبيوتر فقط) ---------- */
-const SECN = { ref: 'مراجع', in: 'مدخلات', out: 'مخرجات' };
+const SECN = { ref: 'مراجع', in: 'مدخلات', out: 'مخرجات', ipc: 'مستخلصات', boq: 'جداول كميات', rep: 'تقارير' };
 const pname = pid => (D.projects.find(x => x.id === pid) || {}).name || pid;
 async function mirrorOne(pid, sec, name, id, buf) {
   if (!DT) return;
@@ -176,7 +179,7 @@ async function folderSync(quiet) {
     if (!(await DT.getRoot())) return;
     for (const p of D.projects) {
       const F = D.files[p.id]; if (!F) continue;
-      for (const sec of ['ref', 'in', 'out']) for (const f of F[sec]) if (!mirrored.has(f.id)) { const b = await api.kvGet('pjf:' + f.id); if (b) await mirrorOne(p.id, sec, f.name, f.id, b); }
+      for (const sec of SECS) for (const f of F[sec]) if (!mirrored.has(f.id)) { const b = await api.kvGet('pjf:' + f.id); if (b) await mirrorOne(p.id, sec, f.name, f.id, b); }
       const list = await DT.scan(p.id, p.name);
       for (const it of list) {
         const sec = Object.keys(SECN).find(k => SECN[k] === it.sec); if (!sec) continue;
@@ -199,12 +202,13 @@ async function pickRootFlow() {
 
 /* ---------- screens ---------- */
 let cur = { pid: null, sec: 'in' };
-const SEC = { ref: '📚 المراجع', in: '📥 المدخلات', out: '📤 المخرجات' };
+const SEC = { ref: '📚 المراجع والعقد', in: '📥 المدخلات', out: '📤 المخرجات', ipc: '💰 المستخلصات', boq: '📊 جداول الكميات', rep: '📝 التقارير' };
+const SEC_HELP = { ref: 'العقد والمواصفات والمخططات المعتمدة والكود — الذكاء بيراجع وبيكتب التقارير على أساسها.', in: 'تقارير ومخططات المقاول اللي عاوز تراجعها.', out: 'الملفات المراجَعة والمعدّلة (بتتحفظ هنا تلقائي).', ipc: 'المستخلصات الشهرية والنهائية (PDF أو Excel).', boq: 'جداول الكميات (BOQ) — PDF أو Excel.', rep: 'التقارير اللي بيولّدها البرنامج، وأي تقرير تحط فيه بنفسك.' };
 function home() {
   cur.pid = null;
   root.innerHTML = `<div class="hd"><h2>🗂 مراجعة المشاريع</h2><button data-h="sync" title="مزامنة">🔄</button>${DT ? '<button data-h="rootf" title="الفولدر الرئيسي">📁</button>' : ''}<button data-h="stamps">🖋 أختام</button><button data-h="cfg">⚙</button>${REVIEW ? '<button class="b" data-h="x">📄 المحرر</button>' : '<button class="r" data-h="x">✕</button>'}</div><div class="bd">${!hasLink() ? '<div class="rw" style="background:#fff7e0;border-color:#f0c040;color:#5b4300"><span>⚠ الجهاز مش مربوط — اربطه علشان المشاريع تظهر على الجوال واللابتوب</span><button class="g" data-h="cfg">اربط</button></div>' : ''}${GROUPS.map(([g, n]) => `<h3>${n}</h3><div class="gr">${D.projects.filter(p => p.group === g).map(p => `<button data-p="${p.id}">${esc(p.name)}</button>`).join('')}<button class="g" data-add="${g}">＋ مشروع</button></div>`).join('')}</div>`;
   root.querySelectorAll('[data-p]').forEach(b => b.onclick = () => project(b.dataset.p));
-  root.querySelectorAll('[data-add]').forEach(b => b.onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text"><button class="g" data-ok>إضافة</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { const p = { id: uid(), name: r.n.trim(), group: b.dataset.add, t: Date.now() }; D.projects.push(p); D.files[p.id] = { ref: [], in: [], out: [] }; await save(); home(); } });
+  root.querySelectorAll('[data-add]').forEach(b => b.onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text"><button class="g" data-ok>إضافة</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { const p = { id: uid(), name: r.n.trim(), group: b.dataset.add, t: Date.now() }; D.projects.push(p); D.files[p.id] = Object.fromEntries(SECS.map(k => [k, []])); await save(); home(); } });
   root.querySelector('[data-h=x]').onclick = () => { root.hidden = true; };
   root.querySelectorAll('[data-h=cfg]').forEach(b => b.onclick = settings);
   root.querySelector('[data-h=sync]').onclick = () => RS && RS.run(true).then(() => home());
@@ -215,32 +219,35 @@ function project(pid, sec) {
   cur.pid = pid; if (sec) cur.sec = sec; const p = D.projects.find(x => x.id === pid), L = D.files[pid][cur.sec];
   root.innerHTML = `<div class="hd"><button data-h="back">→</button><h2>${esc(p.name)}</h2><button data-h="ren">✎</button><button class="r" data-h="del">🗑</button></div><div class="bd">
   <div class="tb">${Object.entries(SEC).map(([k, n]) => `<button data-s="${k}" class="${k === cur.sec ? 'on' : ''}">${n} (${D.files[pid][k].length})</button>`).join('')}</div>
-  <div class="sm">${cur.sec === 'ref' ? 'ملفات مرجعية (مواصفات، BOQ، مخططات معتمدة، كود) — الذكاء بيراجع على أساسها.' : cur.sec === 'in' ? 'تقارير ومخططات المقاول اللي عاوز تراجعها.' : 'الملفات اللي اتكتب عليها (PDF).'}</div>
+  <div class="sm">${SEC_HELP[cur.sec]}</div>
+  <button class="b" data-rp="1" style="width:100%;margin-bottom:8px">📝 اعمل تقرير عن المشروع</button>
   ${DT ? '<div class="rw" id="pjfold"><span>📁 <small id="pjpath">…</small></span><button data-h="fopen">فتح</button><button data-h="fpick">ربط فولدر</button><button data-h="fscan">🔄</button></div>' : ''}
   <button class="g" data-up="1" style="width:100%;margin-bottom:10px">＋ رفع ملفات</button>
-  ${L.length ? L.map(f => `<div class="rw"><span>${/pdf/i.test(f.type) ? '📄' : /image/.test(f.type) ? '🖼' : '📝'} ${esc(f.name)}<br><small>${sizeTxt(f.size)} • ${new Date(f.t).toLocaleDateString('ar-SA')}</small></span>
-   ${/pdf/i.test(f.type) ? `<button data-o="${f.id}">فتح</button>` : ''}${cur.sec === 'in' && /pdf/i.test(f.type) ? `<button class="b" data-rv="${f.id}">🤖 راجع</button>` : ''}${cur.sec === 'out' ? `<button data-sh="${f.id}">📤</button>` : ''}<button class="r" data-d="${f.id}">🗑</button></div>`).join('') : '<div class="sm">لا يوجد ملفات بعد.</div>'}</div>
+  ${L.length ? L.map(f => `<div class="rw"><span>${isPdf(f) ? '📄' : /image/.test(f.type) ? '🖼' : /sheet|excel|csv|xls/i.test(f.type + f.name) ? '📊' : '📝'} ${esc(f.name)}<br><small>${sizeTxt(f.size)} • ${new Date(f.t).toLocaleDateString('ar-SA')}</small></span>
+   ${isPdf(f) ? `<button data-o="${f.id}">فتح</button>` : `<button data-dl="${f.id}">⬇</button>`}${cur.sec === 'in' && /pdf/i.test(f.type) ? `<button class="b" data-rv="${f.id}">🤖 راجع</button>` : ''}${(cur.sec === 'out' || cur.sec === 'rep') && isPdf(f) ? `<button data-sh="${f.id}">📤</button>` : ''}<button class="r" data-d="${f.id}">🗑</button></div>`).join('') : '<div class="sm">لا يوجد ملفات بعد.</div>'}</div>
   <input type="file" id="pjup" multiple hidden>`;
   root.querySelector('[data-h=back]').onclick = home;
   if (DT) {
     DT.folder(pid, p.name).then(f => { const e = root.querySelector('#pjpath'); if (e) e.textContent = f || 'اختار الفولدر الرئيسي الأول (📁 من الشاشة الرئيسية)'; });
     root.querySelector('[data-h=fopen]').onclick = () => DT.open(pid, p.name);
-    root.querySelector('[data-h=fpick]').onclick = async () => { const r = await DT.pickFolder(pid, p.name); if (r) { for (const k of ['ref', 'in', 'out']) D.files[pid][k].forEach(f => mirrored.delete(f.id)); await folderSync(); project(pid); } };
+    root.querySelector('[data-h=fpick]').onclick = async () => { const r = await DT.pickFolder(pid, p.name); if (r) { for (const k of SECS) D.files[pid][k].forEach(f => mirrored.delete(f.id)); await folderSync(); project(pid); } };
     root.querySelector('[data-h=fscan]').onclick = async () => { await folderSync(); project(pid); api.toast('تم فحص الفولدر'); };
   }
   root.querySelector('[data-h=ren]').onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text" value="${esc(p.name)}"><button class="g" data-ok>حفظ</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { p.name = r.n.trim(); p.t = Date.now(); await save(); project(pid); } };
-  root.querySelector('[data-h=del]').onclick = async () => { if (confirm('حذف المشروع «' + p.name + '» وكل ملفاته؟')) { for (const k of ['ref', 'in', 'out']) for (const f of D.files[pid][k]) api.kvSet('pjf:' + f.id, null); bury(pid); for (const k of ['ref', 'in', 'out']) D.files[pid][k].forEach(f => bury(f.id)); D.projects = D.projects.filter(x => x.id !== pid); delete D.files[pid]; await save(); home(); } };
+  root.querySelector('[data-h=del]').onclick = async () => { if (confirm('حذف المشروع «' + p.name + '» وكل ملفاته؟')) { for (const k of SECS) for (const f of D.files[pid][k]) api.kvSet('pjf:' + f.id, null); bury(pid); for (const k of SECS) D.files[pid][k].forEach(f => bury(f.id)); D.projects = D.projects.filter(x => x.id !== pid); delete D.files[pid]; await save(); home(); } };
   root.querySelectorAll('[data-s]').forEach(b => b.onclick = () => project(pid, b.dataset.s));
-  const up = root.querySelector('#pjup'); up.accept = cur.sec === 'ref' ? '.pdf,.txt,.md,.png,.jpg,.jpeg,.csv' : 'application/pdf';
+  const up = root.querySelector('#pjup'); up.accept = cur.sec === 'ref' ? '.pdf,.txt,.md,.png,.jpg,.jpeg,.csv,.xlsx,.xls' : (cur.sec === 'ipc' || cur.sec === 'boq') ? '.pdf,.xlsx,.xls,.csv' : 'application/pdf';
   root.querySelector('[data-up]').onclick = () => up.click();
   up.onchange = async () => { api.toast('جارٍ الرفع…'); for (const f of up.files) await addFile(pid, cur.sec, f); await save(); project(pid); api.toast('تم الرفع ✔'); };
   root.querySelectorAll('[data-o]').forEach(b => b.onclick = () => openFile(pid, b.dataset.o));
+  root.querySelector('[data-rp]').onclick = () => reportFlow(pid);
+  root.querySelectorAll('[data-dl]').forEach(b => b.onclick = async () => { const f = L.find(x => x.id === b.dataset.dl), u = URL.createObjectURL(new Blob([await api.kvGet('pjf:' + f.id)])), a = document.createElement('a'); a.href = u; a.download = f.name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); });
   root.querySelectorAll('[data-rv]').forEach(b => b.onclick = () => reviewFlow(pid, b.dataset.rv));
   root.querySelectorAll('[data-sh]').forEach(b => b.onclick = async () => { const f = L.find(x => x.id === b.dataset.sh); api.deliver(new Uint8Array(await api.kvGet('pjf:' + f.id)), f.name.replace(/\.pdf$/i, ''), true); });
   root.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => { const i = L.findIndex(x => x.id === b.dataset.d); if (confirm('حذف «' + L[i].name + '»؟')) { api.kvSet('pjf:' + L[i].id, null); bury(L[i].id); L.splice(i, 1); await save(); project(pid); } });
 }
 async function openFile(pid, fid) {
-  const sec = ['ref', 'in', 'out'].find(k => D.files[pid][k].some(f => f.id === fid)), f = D.files[pid][sec].find(x => x.id === fid), bytes = await api.kvGet('pjf:' + fid);
+  const sec = SECS.find(k => D.files[pid][k].some(f => f.id === fid)), f = D.files[pid][sec].find(x => x.id === fid), bytes = await api.kvGet('pjf:' + fid);
   if (!bytes) return api.toast('الملف مش موجود');
   root.hidden = true; await api.openBytes(bytes.slice(0), f.name, { pid, sec, fid });
 }
@@ -356,6 +363,113 @@ function applyReview(pane, res, style) {
     t.r = isAr(res.summary || 'ع') ? 1 : 0; if (t.r) t.x = .98 - t.w; g0.strokes.unshift(t);
   }
 }
+/* ---------- التقارير ---------- */
+const RTYPES = { general: 'تقرير عام عن المشروع (نظرة شاملة)', contract: 'ملخص العقد وشروطه', qty: 'تقرير الكميات (جداول الكميات)', ipc: 'تقرير المستخلصات والموقف المالي', custom: 'تقرير مخصص (أكتب طلبي)' };
+const RTOOL = {
+  name: 'submit_report', description: 'تسليم التقرير النهائي', input_schema: { type: 'object', required: ['title', 'sections'], properties: {
+    title: { type: 'string' }, subtitle: { type: 'string' },
+    sections: { type: 'array', items: { type: 'object', required: ['heading'], properties: {
+      heading: { type: 'string' }, paragraphs: { type: 'array', items: { type: 'string' } }, bullets: { type: 'array', items: { type: 'string' } },
+      table: { type: 'object', properties: { headers: { type: 'array', items: { type: 'string' } }, rows: { type: 'array', items: { type: 'array', items: { type: 'string' } } } } } } } },
+    missing: { type: 'array', items: { type: 'string' }, description: 'معلومات مطلوبة وغير واردة في المستندات' } } }
+};
+async function sheetText(u8, name) {
+  try {
+    const X = await import('xlsx'), wb = X.read(u8, { type: 'array' }); let t = '';
+    for (const n of wb.SheetNames) t += '## ورقة: ' + n + '\n' + X.utils.sheet_to_csv(wb.Sheets[n], { blankrows: false }) + '\n';
+    return t.slice(0, 250000);
+  } catch (e) { return '(تعذّر قراءة ملف Excel ' + name + ')'; }
+}
+async function reportContent(pid) {
+  const content = [], used = []; let total = 0;
+  for (const sec of ['ref', 'boq', 'ipc', 'in']) for (const f of D.files[pid][sec]) {
+    const bytes = await api.kvGet('pjf:' + f.id); if (!bytes) continue; const u8 = new Uint8Array(bytes), lab = SECN[sec] + ': ' + f.name;
+    if (/\.(xlsx|xls)$/i.test(f.name) || /sheet|excel/i.test(f.type)) { const t = await sheetText(u8, f.name); content.push({ type: 'text', text: '--- ' + lab + ' (جدول) ---\n' + t }); total += t.length; used.push(lab); }
+    else if (isPdf(f)) { total += u8.length; if (total > 30 * 1048576) throw new Error('حجم ملفات المشروع كبير (' + sizeTxt(total) + '). الحد حوالي 30MB — احذف ملفات مش لازمة أو قسّم الطلب.'); content.push({ type: 'document', title: lab, source: { type: 'base64', media_type: 'application/pdf', data: b64(u8) } }); used.push(lab); }
+    else if (/^image\/(png|jpe?g)/.test(f.type)) { total += u8.length; content.push({ type: 'image', source: { type: 'base64', media_type: f.type.replace('jpg', 'jpeg'), data: b64(u8) } }); used.push(lab); }
+    else if (/text|csv|markdown/i.test(f.type) || /\.(txt|md|csv)$/i.test(f.name)) { const t = new TextDecoder().decode(u8).slice(0, 200000); content.push({ type: 'text', text: '--- ' + lab + ' ---\n' + t }); used.push(lab); }
+  }
+  return { content, used };
+}
+async function callReport(pid, o) {
+  const c = D.cfg; if (!c.key) throw new Error('حط مفتاح API الأول من ⚙ الإعدادات');
+  const proj = D.projects.find(x => x.id === pid), { content, used } = await reportContent(pid);
+  if (!content.length) throw new Error('مفيش ملفات في المشروع — ارفع العقد وجداول الكميات الأول.');
+  const ask = { general: 'اكتب تقريرًا عامًا شاملًا عن المشروع: نبذة عن المشروع والأطراف، نطاق الأعمال، قيمة العقد ومدته وتواريخه، أهم شروط العقد (الدفعات، الغرامات، الضمان، الاستقطاعات)، ملخص الكميات والبنود الرئيسية وقيمتها، موقف المستخلصات إن وُجدت، أهم المخاطر والملاحظات.', contract: 'لخّص العقد بالتفصيل: الأطراف، النطاق، القيمة، المدة، شروط الدفع، الغرامات، الضمانات، الاستقطاعات، التغييرات والمطالبات، إنهاء العقد، وأي شروط خاصة أو مخاطر.', qty: 'اكتب تقريرًا عن الكميات: ملخص جداول الكميات حسب القسم/النظام، أهم البنود وكمياتها وأسعارها وإجمالياتها كما وردت، ومقارنة بين الجداول إن تعددت، وأي ملاحظات على البنود (غياب سعر، اختلاف وحدة، تكرار).', ipc: 'اكتب تقريرًا عن المستخلصات: رقم كل مستخلص وتاريخه وقيمته والإجمالي التراكمي والنسبة المنفذة من قيمة العقد والاستقطاعات والمبلغ الصافي، وأي ملاحظات.', custom: o.extra || '' }[o.kind] + (o.kind !== 'custom' && o.extra ? '\nتعليمات إضافية من المهندس: ' + o.extra : '');
+  content.push({ type: 'text', text: `المشروع: ${proj.name}\nالملفات المرفقة: ${used.join(' | ')}\n\nالمطلوب: ${ask}\n\nسلّم التقرير عبر الأداة submit_report.` });
+  const system = `أنت مهندس استشاري سعودي بتكتب تقارير هندسية وتعاقدية للمهندس محمد خلف (مهندس كهرباء، الرياض).
+القواعد الصارمة:
+- اكتب من واقع المستندات المرفقة فقط. ممنوع اختراع أي رقم أو بند أو تاريخ أو شرط. المعلومة اللي مش موجودة اكتبها في الحقل missing وفي النص «غير وارد في المستندات المرفقة».
+- الأرقام والبنود والكميات تُنقل كما وردت بالحرف (الوحدة والعملة كما هي). لو حسبت مجموعًا أو نسبة، وضّح إنه محسوب من الأرقام الواردة وكيف.
+- اذكر مصدر كل معلومة مهمة بين قوسين بصيغة [اسم الملف، ص#] قدر الإمكان.
+- أسلوب مهني واضح بالعربية، مقسّم لعناوين، واستخدم جداول للأرقام المتعددة. لا مقدمات ولا حشو.`;
+  const body = { model: c.model, max_tokens: 12000, system, tools: [RTOOL], tool_choice: { type: 'tool', name: 'submit_report' }, messages: [{ role: 'user', content }] };
+  const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 900000); let r;
+  try { r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', signal: ac.signal, headers: { 'content-type': 'application/json', 'x-api-key': c.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify(body) }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'انتهى الوقت' : 'مفيش اتصال بالإنترنت أو الاتصال اتحجب'); } finally { clearTimeout(tm); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const m = (j.error && j.error.message) || ('HTTP ' + r.status); throw new Error(r.status === 401 ? 'مفتاح API غلط أو منتهي' : r.status === 429 ? 'تجاوزت حد الاستخدام، جرّب بعد شوية' : r.status === 413 ? 'الملفات كبيرة على الـAPI' : m); }
+  const tu = (j.content || []).find(x => x.type === 'tool_use'); if (!tu) throw new Error('الرد مش مفهوم، جرّب تاني');
+  if (j.stop_reason === 'max_tokens') tu.input.missing = (tu.input.missing || []).concat('⚠ التقرير اتقطع لطول الرد — اطلب جزء محدد منه.');
+  return tu.input;
+}
+async function renderReport(res, projName) {
+  await fontsReady;
+  const W = 1240, H = 1754, M = 90, pages = []; let x, y;
+  const newPage = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); y = M; pages.push(c); };
+  const font = (px, b) => `${b ? 'bold ' : ''}${px}px ${FONT_T}`;
+  const lines = (t, px, b, maxW) => { x.font = font(px, b); const out = []; for (const para of String(t == null ? '' : t).split('\n')) { let ln = ''; for (const w of para.split(/\s+/)) { const tt = ln ? ln + ' ' + w : w; if (x.measureText(tt).width > maxW && ln) { out.push(ln); ln = w; } else ln = tt; } out.push(ln); } return out; };
+  const put = (t, px, o = {}) => { const rtl = isAr(String(t == null ? '' : t)), maxW = W - 2 * M - (o.indent || 0); for (const ln of lines(t, px, o.b, maxW)) { if (y + px * 1.5 > H - M - 40) newPage(); x.font = font(px, o.b); x.fillStyle = o.c || '#111'; x.direction = rtl ? 'rtl' : 'ltr'; x.textAlign = rtl ? 'right' : 'left'; x.fillText(ln, rtl ? W - M - (o.indent || 0) : M + (o.indent || 0), y + px); y += px * (o.g || 1.5); } };
+  const table = t => {
+    const hd = (t.headers || []).map(String), rows = (t.rows || []).map(r => r.map(String)), n = Math.max(hd.length, ...rows.map(r => r.length), 1), cw = (W - 2 * M) / n, rtl = isAr(hd.join(' ') + (rows[0] || []).join(' ')), px = 23, pad = 10;
+    const cx = i => rtl ? W - M - (i + 1) * cw : M + i * cw;
+    const drawRow = (r, head) => {
+      x.font = font(px, head); const cl = Array.from({ length: n }, (_, i) => lines(r[i] || '', px, head, cw - 2 * pad)), h = Math.max(...cl.map(a => a.length)) * px * 1.35 + 2 * pad;
+      if (y + h > H - M - 40) newPage();
+      if (head) { x.fillStyle = '#d7efe9'; x.fillRect(M, y, W - 2 * M, h); }
+      x.strokeStyle = '#9aa7b8'; x.lineWidth = 1;
+      cl.forEach((a, i) => { x.strokeRect(cx(i), y, cw, h); a.forEach((ln, k) => { const r2 = isAr(ln); x.font = font(px, head); x.fillStyle = '#111'; x.direction = r2 ? 'rtl' : 'ltr'; x.textAlign = r2 ? 'right' : 'left'; x.fillText(ln, r2 ? cx(i) + cw - pad : cx(i) + pad, y + pad + px + k * px * 1.35); }); });
+      y += h;
+    };
+    if (hd.length) drawRow(hd, true); rows.forEach(r => drawRow(r, false)); y += 18;
+  };
+  newPage();
+  put(res.title || 'تقرير', 46, { b: 1, c: '#0f766e', g: 1.4 });
+  put((res.subtitle ? res.subtitle + ' — ' : '') + projName + ' — ' + new Date().toLocaleDateString('en-GB'), 26, { c: '#555' });
+  y += 8; x.fillStyle = '#0f766e'; x.fillRect(M, y, W - 2 * M, 3); y += 26;
+  for (const sc of res.sections || []) {
+    if (y > H - 300) newPage();
+    put(sc.heading || '', 34, { b: 1, c: '#0f766e', g: 1.6 });
+    (sc.paragraphs || []).forEach(t => { put(t, 27, { g: 1.6 }); y += 6; });
+    (sc.bullets || []).forEach(t => put('• ' + t, 27, { indent: 18, g: 1.55 }));
+    if (sc.table && (sc.table.rows || []).length) { y += 6; table(sc.table); }
+    y += 14;
+  }
+  if ((res.missing || []).length) { if (y > H - 300) newPage(); put('معلومات غير واردة في المستندات', 32, { b: 1, c: '#b45309', g: 1.6 }); res.missing.forEach(t => put('• ' + t, 26, { indent: 18 })); }
+  const pdf = await PDFDocument.create();
+  for (let i = 0; i < pages.length; i++) {
+    const g = pages[i].getContext('2d'); g.font = font(20); g.fillStyle = '#777'; g.direction = 'ltr'; g.textAlign = 'center'; g.fillText(`${i + 1} / ${pages.length}`, W / 2, H - 44);
+    const d = atob(pages[i].toDataURL('image/png').split(',')[1]), u = new Uint8Array(d.length); for (let k = 0; k < d.length; k++) u[k] = d.charCodeAt(k);
+    const im = await pdf.embedPng(u), pg = pdf.addPage([595.28, 841.89]); pg.drawImage(im, { x: 0, y: 0, width: 595.28, height: 841.89 });
+  }
+  return await pdf.save();
+}
+async function reportFlow(pid) {
+  const c = D.cfg; if (!c.key) { api.toast('حط مفتاح API الأول'); return settings(); }
+  const p = D.projects.find(x => x.id === pid), n = SECS.filter(k => k !== 'rep').reduce((a, k) => a + D.files[pid][k].length, 0);
+  const o = await modal(`<h3 style="margin:0 0 8px">📝 تقرير عن «${esc(p.name)}»</h3>
+  <div class="sm">هيتكتب من ${n} ملف في المشروع (عقد، كميات، مستخلصات، مدخلات) ومن غير ما يخترع أي رقم. بياخد من نص دقيقة لكام دقيقة وبيتحاسب من حسابك.</div>
+  <label>نوع التقرير</label><select name="kind">${Object.entries(RTYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+  <label>طلبك / تفاصيل إضافية (اختياري، ومطلوب في المخصص)</label><textarea name="extra" rows="3" placeholder="مثال: ركز على بنود الإنارة وشروط الدفع، أو: قارن الكميات بالمستخلص رقم 2"></textarea>
+  <button class="g" data-ok>ابدأ</button><button data-x="">إلغاء</button>`);
+  if (!o) return; if (o.kind === 'custom' && !o.extra.trim()) return api.toast('اكتب طلبك للتقرير المخصص');
+  api.toast('⏳ جارٍ كتابة التقرير… ممكن ياخد كام دقيقة'); root.querySelector('[data-rp]') && (root.querySelector('[data-rp]').disabled = true);
+  try {
+    const res = await callReport(pid, o), pdf = await renderReport(res, p.name);
+    const nm = 'تقرير - ' + RTYPES[o.kind].split(' (')[0] + ' - ' + p.name + ' - ' + new Date().toISOString().slice(0, 10) + '.pdf';
+    await addOutput(pid, nm, pdf, 'rep'); project(pid, 'rep'); api.toast('✅ التقرير جاهز في 📝 التقارير' + ((res.missing || []).length ? ` — فيه ${res.missing.length} معلومة غير واردة، راجعها في آخر التقرير` : ''));
+  } catch (e) { project(pid); api.toast('❌ ' + e.message); }
+}
 async function reviewFlow(pid, fid) {
   const c = D.cfg;
   if (!c.key) { api.toast('حط مفتاح API الأول'); return settings(); }
@@ -383,7 +497,7 @@ async function reviewFlow(pid, fid) {
 export async function initProj(a) {
   api = a; css(); await load(); a.S.nstyle = D.cfg.style;
   root = document.createElement('div'); root.id = 'pj'; root.hidden = true; document.body.appendChild(root);
-  RS = initRepoSync({ D, save, kvGet: k => api.kvGet(k), kvSet: (k, v) => api.kvSet(k, v), toast: m => api.toast(m), rerender: () => { if (!root.hidden) cur.pid ? project(cur.pid) : home(); }, after: () => folderSync(true) });
+  RS = initRepoSync({ D, secs: SECS, save, kvGet: k => api.kvGet(k), kvSet: (k, v) => api.kvSet(k, v), toast: m => api.toast(m), rerender: () => { if (!root.hidden) cur.pid ? project(cur.pid) : home(); }, after: () => folderSync(true) });
   if (DT) { addEventListener('focus', () => folderSync(true)); setTimeout(async () => { if (!(await DT.getRoot())) { const r = await modal(`<h3 style="margin:0 0 8px">📁 فولدر المشاريع على الكمبيوتر</h3><div class="sm">اختار فولدر (مثلاً على D: مش C:). هيتعمل جواه فولدر لكل مشروع، وأي ملف تضيفه أو تعدّله في البرنامج بيتكتب فيه تلقائي، وأي ملف تحطه في الفولدر بيظهر في البرنامج.</div><button class="g" data-x="pick">اختيار الفولدر</button><button data-x="">بعدين</button>`); if (r === 'pick') await pickRootFlow(); } else folderSync(true); }, 1200); }
   if (hasLink()) setTimeout(() => RS.run(false), 2500);
   return { open: () => { root.hidden = false; cur.pid ? project(cur.pid) : home(); }, addOutput, pickStamp };
