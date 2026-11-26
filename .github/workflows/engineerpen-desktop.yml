@@ -23,6 +23,7 @@ jobs:
           cp ../index.html ../app.js ../manifest.webmanifest ../icon-192.png ../icon-512.png app/
           cp -r ../pdfjs app/pdfjs
           cp -r ../ocr app/ocr
+          echo '{"v":${{ github.run_number }}}' > app/version.json
       - run: npm install
       - run: npx electron-builder --win nsis --publish never
         env:

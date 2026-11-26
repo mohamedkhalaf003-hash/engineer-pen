@@ -22,6 +22,7 @@ jobs:
         run: |
           mkdir www
           cp index.html app.js manifest.webmanifest icon-192.png icon-512.png www/ && cp -r pdfjs ocr www/
+          echo '{"v":${{ github.run_number }}}' > www/version.json
       - run: npm install
       - run: npx cap add android
       - name: Icons and version

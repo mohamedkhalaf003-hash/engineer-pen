@@ -1,6 +1,7 @@
 import HERO from './hero.js';
 import { initSync } from './sync.js';
 import { strokesToCanvas, recognize } from './ocr.js';
+import { initProj, stampImg, stampData, fitText, makeText, wrap, fontOf, fontsReady } from './proj.js';
 import * as pdfjs from 'pdfjs-dist/build/pdf.min.mjs';
 import { PDFDocument, rgb, LineCapStyle } from 'pdf-lib';
 import workerText from './worker.js';
@@ -12,15 +13,15 @@ pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([workerText],
 const $ = (s, r = document) => r.querySelector(s);
 const A4 = [595, 842], MAXP = 4;
 const COLORS = ['#e11d1d', '#111111', '#1d4ed8', '#16a34a', '#f59e0b'];
-const S = { mode: 'draw', lang: 'ara+eng', tool: 'pen', color: COLORS[0], width: 0.0035, finger: false, orient: 'column', panes: [], active: null };
+const S = { nstyle: 'typed', sel: null, mode: 'draw', lang: 'ara+eng', tool: 'pen', color: COLORS[0], width: 0.0035, finger: false, orient: 'column', panes: [], active: null };
 let uid = 0;
 
 /* ---------- IndexedDB autosave ---------- */
 const idb = () => new Promise((res, rej) => { const r = indexedDB.open('engpen', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 async function kvSet(k, v) { try { const db = await idb(); db.transaction('kv', 'readwrite').objectStore('kv').put(v, k); } catch (e) { } }
 async function kvGet(k) { try { const db = await idb(); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => r(q.result); q.onerror = () => r(null); }); } catch (e) { return null; } }
-let DIRTY = false, READY = false;
-const snap = () => ({ orient: S.orient, panes: S.panes.map(p => ({ kind: p.kind, name: p.name, bytes: p.bytes || null, zoom: p.zoom, pages: p.pages.map(g => ({ w: g.w, h: g.h, strokes: g.strokes })) })) });
+let DIRTY = false, READY = false, PJ = null;
+const snap = () => ({ orient: S.orient, panes: S.panes.map(p => ({ kind: p.kind, name: p.name, proj: p.proj || null, bytes: p.bytes || null, zoom: p.zoom, pages: p.pages.map(g => ({ w: g.w, h: g.h, strokes: g.strokes })) })) });
 const sy = initSync({ snapshot: snap, kvGet, kvSet, toast: m => toast(m) });
 let saveT; const autosave = () => { if (READY) { DIRTY = true; sy.touch(); } clearTimeout(saveT); saveT = setTimeout(persist, 900); };
 function persist() {
@@ -38,6 +39,17 @@ document.body.innerHTML = `
   <button data-a="open"><b>📂</b><small>فتح PDF</small></button>
   <button data-a="draft"><b>📝</b><small>مسودة</small></button>
   <button data-a="nb"><b>📒</b><small>نوت بوك</small></button>
+  <button data-a="proj" class="sv"><b>🗂</b><small>مشاريع</small></button>
+ </div></section>
+ <section class="bx"><h3>🖊 ملاحظات وأختام</h3><div class="tl">
+  <button data-t="txt"><b>🔤</b><small>نص</small></button>
+  <button data-t="sel"><b>👆</b><small>تحديد/نقل</small></button>
+  <button data-a="nstyle" id="bns"><b>Aa</b><small>مطبوع</small></button>
+  <button data-a="stamp"><b>🖋</b><small>ختم/توقيع</small></button>
+  <button data-a="itbig"><b>＋</b><small>تكبير</small></button>
+  <button data-a="itsmall"><b>－</b><small>تصغير</small></button>
+  <button data-a="itedit"><b>✎</b><small>تعديل</small></button>
+  <button data-a="itdel"><b>🗑</b><small>حذف</small></button>
  </div></section>
  <section class="bx"><h3>✏️ أدوات الرسم</h3><div class="tl">
   <button data-t="pen" class="on"><b>✏️</b><small>قلم</small></button>
@@ -154,7 +166,7 @@ function setActive(p) { S.active = p; S.panes.forEach(x => x.el.classList.toggle
 
 function addPane(kind, name, pages, extra = {}) {
   if (S.panes.length >= MAXP) { toast('الحد الأقصى ' + MAXP + ' نوافذ، اقفل واحدة'); return null; }
-  const p = { id: ++uid, kind, name, pages, zoom: extra.zoom || 1, bytes: extra.bytes || null, pdf: extra.pdf || null, undo: [] };
+  const p = { id: ++uid, kind, name, pages, proj: extra.proj || null, zoom: extra.zoom || 1, bytes: extra.bytes || null, pdf: extra.pdf || null, undo: [] };
   const el = document.createElement('div'); el.className = 'pane';
   el.innerHTML = `<div class="ph"><span></span>${kind !== 'pdf' ? '<button data-p="add">＋ صفحة</button>' : ''}<button data-p="zo">－</button><button data-p="zi">＋</button><button data-p="x">✕</button></div><div class="pb"></div>`;
   $('span', el).textContent = name;
@@ -222,12 +234,13 @@ async function renderPage(p, g) {
 }
 const LN = { 'ara+eng': 'عربي+EN', eng: 'EN', ara: 'عربي' };
 function drawText(ctx, s, W, H, ox = 0, oy = 0) {
-  const fs = s.fs * W, lh = fs * 1.25; ctx.save(); ctx.fillStyle = s.c; ctx.font = fs + 'px Tahoma,"Noto Naskh Arabic","Segoe UI",Arial,sans-serif';
+  const fs = s.fs * W, lh = fs * 1.25; ctx.save(); ctx.fillStyle = s.c; ctx.font = fontOf(s, fs);
   ctx.direction = s.r ? 'rtl' : 'ltr'; ctx.textAlign = s.r ? 'right' : 'left'; ctx.textBaseline = 'top';
   const X = (s.r ? s.x + s.w : s.x) * W - ox; s.l.forEach((ln, i) => ctx.fillText(ln, X, s.y * H + i * lh - oy)); ctx.restore();
 }
 function drawStroke(ctx, s, W, H) {
   if (s.t === 'tx') return drawText(ctx, s, W, H);
+  if (s.t === 'im') { const im = stampImg(s.sid, () => S.panes.forEach(q => q.pages.forEach(g => g.ink && redrawInk(g)))); if (im) ctx.drawImage(im, s.x * W, s.y * H, s.w * W, s.h * H); return; }
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = s.c;
   ctx.globalAlpha = s.t === 'hl' ? 0.35 : 1;
   const pts = s.p;
@@ -241,12 +254,38 @@ function drawStroke(ctx, s, W, H) {
 function redrawInk(g) {
   const c = g.ink, x = c.getContext('2d'); x.clearRect(0, 0, c.width, c.height);
   g.strokes.forEach(s => drawStroke(x, s, c.width, c.height));
+  if (S.sel && S.sel.g === g && g.strokes.includes(S.sel.s)) { const s = S.sel.s; x.save(); x.strokeStyle = '#2563eb'; x.lineWidth = Math.max(2, c.width / 300); x.setLineDash([8, 6]); x.strokeRect(s.x * c.width - 4, s.y * c.height - 4, s.w * c.width + 8, s.h * c.height + 8); x.restore(); }
 }
 
 /* ---------- Input: pen draws, finger scrolls / pinch zooms ---------- */
+const hitItem = (g, x, y) => { for (let i = g.strokes.length - 1; i >= 0; i--) { const s = g.strokes[i]; if ((s.t === 'tx' || s.t === 'im') && x >= s.x - .01 && x <= s.x + s.w + .01 && y >= s.y - .01 && y <= s.y + s.h + .01) return s; } return null; };
+function addNote(p, g, x, y) {
+  const t = prompt('اكتب الملاحظة:'); if (!t || !t.trim()) return;
+  const s = makeText(g, t.trim(), 0, 0, { f: S.nstyle === 'hand' ? 'h' : undefined, c: S.color });
+  s.x = +Math.min(.99 - s.w, Math.max(.005, s.r ? x - s.w : x)).toFixed(4); s.y = +Math.min(.99 - s.h, Math.max(.005, y)).toFixed(4);
+  g.strokes.push(s); p.undo.push({ t: 'add', g, s }); S.sel = { g, s }; redrawInk(g); autosave(); setTool('sel');
+}
+async function placeStamp(p, g, x, y) {
+  const st = S.stampPending; if (!st) { setTool('sel'); return; }
+  const w = .2, s = { t: 'im', sid: st.id, ar: st.ar, w, h: +(w * st.ar * g.w / g.h).toFixed(4), x: 0, y: 0 };
+  s.x = +Math.min(.99 - s.w, Math.max(.005, x - s.w / 2)).toFixed(4); s.y = +Math.min(.99 - s.h, Math.max(.005, y - s.h / 2)).toFixed(4);
+  g.strokes.push(s); p.undo.push({ t: 'add', g, s }); S.sel = { g, s }; S.stampPending = null; setTool('sel'); redrawInk(g); autosave();
+}
+function itemAct(a) {
+  const q = S.sel; if (!q || !q.g.strokes.includes(q.s)) return toast('اختار عنصر بأداة «تحديد» الأول');
+  const { g, s } = q;
+  if (a === 'itdel') { g.strokes = g.strokes.filter(x => x !== s); S.active && S.active.undo.push({ t: 'del', g, s: [s] }); S.sel = null; }
+  if (a === 'itedit' && s.t === 'tx') { const t = prompt('عدّل النص:', s.l.join(' ')); if (!t) return; s.l = wrap(t, s.fs, Math.max(.3, s.w), s.f); s.r = (t.match(/[\u0600-\u06FF]/g) || []).length > (t.match(/[A-Za-z]/g) || []).length ? 1 : 0; fitText(g, s); }
+  if (a === 'itbig' || a === 'itsmall') {
+    const k = a === 'itbig' ? 1.12 : 1 / 1.12, right = s.x + s.w;
+    if (s.t === 'tx') { s.fs = +(s.fs * k).toFixed(4); fitText(g, s); if (s.r) s.x = +(right - s.w).toFixed(4); }
+    else { s.w = +(s.w * k).toFixed(4); s.h = +(s.w * s.ar * g.w / g.h).toFixed(4); }
+  }
+  redrawInk(g); autosave();
+}
 function wireInput(p) {
   const body = p.body, touches = new Map();
-  let cur = null, pinch = null, vel = 0, velY = 0, lastT = 0;
+  let cur = null, pinch = null, vel = 0, velY = 0, lastT = 0, drag = null;
   const pos = (e, g) => { const r = g.ink.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
   const pageAt = e => { const el = document.elementFromPoint(e.clientX, e.clientY); const pe = el && el.closest && el.closest('.page'); return p.pages.find(g => g.el === pe); };
   const isPen = e => e.pointerType === 'pen' || e.pointerType === 'mouse' || (S.finger && e.pointerType === 'touch');
@@ -255,6 +294,14 @@ function wireInput(p) {
     if (isPen(e)) {
       const g = pageAt(e) || p.pages.find(x => { const r = x.el.getBoundingClientRect(); return e.clientY >= r.top && e.clientY <= r.bottom; });
       if (!g) return;
+      if (S.tool === 'txt' || S.tool === 'sel' || S.tool === 'stp') {
+        const [x, y] = pos(e, g);
+        if (S.tool === 'txt') { addNote(p, g, x, y); return; }
+        if (S.tool === 'stp') { placeStamp(p, g, x, y); return; }
+        const it = hitItem(g, x, y), old = S.sel; S.sel = it ? { g, s: it } : null;
+        if (it) drag = { g, s: it, dx: x - it.x, dy: y - it.y };
+        if (old && old.g !== g) redrawInk(old.g); redrawInk(g); return;
+      }
       const erase = S.tool === 'er' || (e.buttons & 32);
       cur = { g, erase, removed: [], s: erase ? null : { k: S.mode === 'type' && S.tool === 'pen' ? 1 : undefined, t: S.tool === 'hl' ? 'hl' : 'pen', c: S.color, w: S.tool === 'hl' ? S.width * 5 : S.width, p: [] } };
       addPt(e);
@@ -272,7 +319,7 @@ function wireInput(p) {
       if (cur.erase) {
         const W = g.ink.getBoundingClientRect().width, H = g.ink.getBoundingClientRect().height, rad = 14;
         g.strokes = g.strokes.filter((s, i) => {
-          const hit = s.t === 'tx' ? (x >= s.x - .005 && x <= s.x + s.w + .005 && y >= s.y - .005 && y <= s.y + s.h + .005) : s.p.some(q => Math.hypot((q[0] - x) * W, (q[1] - y) * H) < rad + s.w * W);
+          const hit = (s.t === 'tx' || s.t === 'im') ? (x >= s.x - .005 && x <= s.x + s.w + .005 && y >= s.y - .005 && y <= s.y + s.h + .005) : s.p.some(q => Math.hypot((q[0] - x) * W, (q[1] - y) * H) < rad + s.w * W);
           if (hit) cur.removed.push(s); return !hit;
         });
         redrawInk(g);
@@ -287,6 +334,7 @@ function wireInput(p) {
     });
   }
   body.addEventListener('pointermove', e => {
+    if (drag && isPen(e)) { const [x, y] = pos(e, drag.g); drag.s.x = +Math.min(.99 - drag.s.w, Math.max(.005, x - drag.dx)).toFixed(4); drag.s.y = +Math.min(.99 - drag.s.h, Math.max(.005, y - drag.dy)).toFixed(4); redrawInk(drag.g); return; }
     if (cur && isPen(e)) { addPt(e); return; }
     const t = touches.get(e.pointerId); if (!t) return;
     if (touches.size === 2 && pinch) {
@@ -303,6 +351,7 @@ function wireInput(p) {
     const now = performance.now(), dt = Math.max(1, now - lastT); lastT = now; vel = -dx / dt * 16; velY = -dy / dt * 16;
   });
   const end = e => {
+    if (drag) { drag = null; autosave(); return; }
     if (cur) {
       const g = cur.g;
       if (cur.erase) { if (cur.removed.length) p.undo.push({ t: 'del', g, s: cur.removed }); }
@@ -320,17 +369,15 @@ function wireInput(p) {
 }
 
 /* ---------- Actions ---------- */
-async function openPdfFiles(files) {
-  for (const f of files) {
-    try {
-      const bytes = await f.arrayBuffer();
-      const pdf = await pdfjs.getDocument({ data: bytes.slice(0), cMapUrl: 'pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: 'pdfjs/standard_fonts/', useSystemFonts: true, disableFontFace: true }).promise;
-      const pages = [];
-      for (let i = 1; i <= pdf.numPages; i++) { const v = (await pdf.getPage(i)).getViewport({ scale: 1 }); pages.push({ w: v.width, h: v.height, strokes: [] }); }
-      if (!addPane('pdf', f.name, pages, { bytes, pdf })) break;
-    } catch (e) { toast('تعذّر فتح ' + f.name); }
-  }
+async function openBytes(bytes, name, proj) {
+  try {
+    const pdf = await pdfjs.getDocument({ data: bytes.slice(0), cMapUrl: 'pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: 'pdfjs/standard_fonts/', useSystemFonts: true, disableFontFace: true }).promise;
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) { const v = (await pdf.getPage(i)).getViewport({ scale: 1 }); pages.push({ w: v.width, h: v.height, strokes: [] }); }
+    return addPane('pdf', name, pages, { bytes, pdf, proj });
+  } catch (e) { toast('تعذّر فتح ' + name); return null; }
 }
+async function openPdfFiles(files) { for (const f of files) { if (!await openBytes(await f.arrayBuffer(), f.name)) break; } }
 function stamp() { const d = new Date(); return d.toISOString().slice(0, 16).replace(/[:T]/g, '-'); }
 async function exportPdf(p) {
   let doc;
@@ -352,11 +399,12 @@ async function exportPdf(p) {
     const vw = r % 180 ? h0 : w0, vh = r % 180 ? w0 : h0;
     const map = (u, v) => { const X = u * vw, Y = v * vh; return r === 0 ? { x: X, y: h0 - Y } : r === 90 ? { x: Y, y: X } : r === 180 ? { x: w0 - X, y: Y } : { x: w0 - Y, y: h0 - X }; };
     g.strokes.forEach(s => {
-      const col = s.c, c = rgb(parseInt(col.slice(1, 3), 16) / 255, parseInt(col.slice(3, 5), 16) / 255, parseInt(col.slice(5, 7), 16) / 255);
+      const col = s.c || '#000000', c = rgb(parseInt(col.slice(1, 3), 16) / 255, parseInt(col.slice(3, 5), 16) / 255, parseInt(col.slice(5, 7), 16) / 255);
       if (s.t === 'tx') {
         if (r) return; const cv = document.createElement('canvas'), K = 3, Wc = vw * K, Hc = vh * K; cv.width = Math.ceil(s.w * Wc) + 8; cv.height = Math.ceil(s.h * Hc) + 8;
         drawText(cv.getContext('2d'), s, Wc, Hc, s.x * Wc - 4, s.y * Hc - 4); imgs.push([pg, cv, map(s.x, s.y + s.h), s.w * vw + 8 / K, s.h * vh + 8 / K]); return;
       }
+      if (s.t === 'im') { if (r) return; imgs.push([pg, { png: stampData(s.sid) }, map(s.x, s.y + s.h), s.w * vw, s.h * vh]); return; }
       const op = s.t === 'hl' ? .35 : 1;
       if (s.p.length === 1) { const a = map(s.p[0][0], s.p[0][1]); pg.drawCircle({ x: a.x, y: a.y, size: s.w * vw / 2, color: c, opacity: op }); return; }
       for (let k = 1; k < s.p.length; k++) {
@@ -365,32 +413,37 @@ async function exportPdf(p) {
       }
     });
   });
-  for (const [pg, cv, a, w, h] of imgs) { const im = await doc.embedPng(await new Promise(r => cv.toBlob(b => b.arrayBuffer().then(r), 'image/png'))); pg.drawImage(im, { x: a.x - 4 / 3, y: a.y - 4 / 3, width: w, height: h }); }
+  for (const [pg, cv, a, w, h] of imgs) { if (cv.png) { if (!cv.png) continue; const im = await doc.embedPng(await (await fetch(cv.png)).arrayBuffer()); pg.drawImage(im, { x: a.x, y: a.y, width: w, height: h }); continue; } const im = await doc.embedPng(await new Promise(r => cv.toBlob(b => b.arrayBuffer().then(r), 'image/png'))); pg.drawImage(im, { x: a.x - 4 / 3, y: a.y - 4 / 3, width: w, height: h }); }
   return await doc.save();
+}
+async function deliver(out, base, share) {
+  if (Capacitor.isNativePlatform()) {
+    let b64 = ''; const CH = 0x8000;
+    for (let i = 0; i < out.length; i += CH) b64 += String.fromCharCode.apply(null, out.subarray(i, i + CH));
+    b64 = btoa(b64);
+    try {
+      if (share) throw new Error('share');
+      await Filesystem.writeFile({ path: 'EngineerPen/' + base + '.pdf', data: b64, directory: Directory.Documents, recursive: true });
+      toast('✅ تم الحفظ في: الملفات ← Documents ← EngineerPen\n' + base + '.pdf');
+    } catch (e) {
+      const r = await Filesystem.writeFile({ path: base + '.pdf', data: b64, directory: Directory.Cache });
+      await Share.share({ title: base + '.pdf', files: [r.uri], dialogTitle: 'حفظ أو مشاركة PDF' });
+    }
+  } else {
+    const blob = new Blob([out], { type: 'application/pdf' }), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = base + '.pdf'; document.body.appendChild(a); a.click(); a.remove();
+    toast('تم الحفظ في التنزيلات: ' + base + '.pdf');
+  }
 }
 async function savePane(share) {
   const p = S.active; if (!p) return toast('افتح ملف أو مسودة أولاً');
   toast('جارٍ الحفظ…');
   try {
+    flushConv();
     const out = await exportPdf(p);
-    const base = p.kind === 'pdf' ? p.name.replace(/\.pdf$/i, '') + '-معدّل' : (p.kind === 'nb' ? 'نوت-بوك-' : 'مسودة-') + stamp();
-    if (Capacitor.isNativePlatform()) {
-      let b64 = ''; const CH = 0x8000;
-      for (let i = 0; i < out.length; i += CH) b64 += String.fromCharCode.apply(null, out.subarray(i, i + CH));
-      b64 = btoa(b64);
-      try {
-        if (share) throw new Error('share');
-        await Filesystem.writeFile({ path: 'EngineerPen/' + base + '.pdf', data: b64, directory: Directory.Documents, recursive: true });
-        toast('✅ تم الحفظ في: الملفات ← Documents ← EngineerPen\n' + base + '.pdf');
-      } catch (e) {
-        const r = await Filesystem.writeFile({ path: base + '.pdf', data: b64, directory: Directory.Cache });
-        await Share.share({ title: base + '.pdf', files: [r.uri], dialogTitle: 'حفظ أو مشاركة PDF' });
-      }
-    } else {
-      const blob = new Blob([out], { type: 'application/pdf' }), a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = base + '.pdf'; document.body.appendChild(a); a.click(); a.remove();
-      toast('تم الحفظ في التنزيلات: ' + base + '.pdf');
-    }
+    const base = p.kind === 'pdf' ? p.name.replace(/\.pdf$/i, '') + (p.proj && p.proj.review ? '' : '-معدّل') : (p.kind === 'nb' ? 'نوت-بوك-' : 'مسودة-') + stamp();
+    if (p.proj && PJ) { await PJ.addOutput(p.proj.pid, base + '.pdf', out); toast('📤 اتحفظ في مخرجات المشروع'); if (!share) return; }
+    await deliver(out, base, share);
   } catch (e) { toast('فشل الحفظ: ' + e.message); }
 }
 let convT = null;
@@ -432,6 +485,10 @@ document.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
   const a = b.dataset.a;
   if (a === 'mode') { flushConv(); S.mode = S.mode === 'draw' ? 'type' : 'draw'; b.querySelector('small').textContent = 'القلم: ' + (S.mode === 'draw' ? 'رسم' : 'كتابة'); b.classList.toggle('on', S.mode === 'type'); $('#bl').hidden = S.mode !== 'type'; if (S.mode === 'type') { setTool('pen'); toast('وضع الكتابة: اكتب بالقلم وبعد ثانية ونص هيتحول لحروف مطبوعة'); } }
   if (a === 'lang') { const k = ['ara+eng', 'eng', 'ara']; S.lang = k[(k.indexOf(S.lang) + 1) % 3]; b.querySelector('small').textContent = 'لغة: ' + LN[S.lang]; }
+  if (a === 'proj') PJ ? PJ.open() : toast('لحظة…');
+  if (a === 'nstyle') { S.nstyle = S.nstyle === 'typed' ? 'hand' : 'typed'; b.querySelector('small').textContent = S.nstyle === 'typed' ? 'مطبوع' : 'خط يد'; toast(S.nstyle === 'typed' ? 'الملاحظات الجديدة: كتابة مطبوعة' : 'الملاحظات الجديدة: بخط يد'); }
+  if (a === 'stamp' && PJ) PJ.pickStamp().then(st => { if (st) { S.stampPending = st; setTool('stp'); toast('اضغط على الصفحة في مكان الختم'); } });
+  if (a === 'itbig' || a === 'itsmall' || a === 'itedit' || a === 'itdel') itemAct(a);
   if (a === 'open') fileIn.click();
   if (a === 'draft') addPane('draft', 'مسودة', [{ w: A4[0], h: A4[1], strokes: [] }]);
   if (a === 'nb') addPane('nb', 'نوت بوك', [{ w: A4[0], h: A4[1], strokes: [] }]);
@@ -450,6 +507,19 @@ window.addEventListener('resize', () => S.panes.forEach(p => { fit(p); p.pages.f
 window.addEventListener('beforeunload', persist);
 
 /* ---------- Restore ---------- */
+async function checkUpdate() {
+  try {
+    const cur = (await (await fetch('version.json', { cache: 'no-store' })).json()).v; if (!cur) return;
+    const el = /Electron/i.test(navigator.userAgent), pre = el ? 'engineerpen-desktop-v1.' : 'v1.';
+    const rs = await (await fetch('https://api.github.com/repos/mohamedkhalaf003-hash/engineer-pen/releases?per_page=60')).json();
+    let best = null; for (const r of rs) { if (!r.tag_name.startsWith(pre)) continue; const n = +r.tag_name.slice(pre.length); if (n > cur && (!best || n > best.n)) best = { n, r }; }
+    if (!best) return; const as = best.r.assets.find(a => el ? /Setup\.exe$/.test(a.name) : /\.apk$/.test(a.name)); if (!as) return;
+    if (confirm('فيه تحديث جديد لـ Engineer Pen (نسخة ' + best.n + '). تنزيله وتثبيته فوق القديم دلوقتي؟ (شغلك محفوظ)')) window.open(as.browser_download_url, '_blank');
+  } catch (e) { }
+}
+setTimeout(checkUpdate, 6000);
+initProj({ S, toast: m => toast(m), kvGet, kvSet, openBytes, redraw: g => redrawInk(g), autosave, deliver }).then(x => { PJ = x; });
+fontsReady.then(() => setTimeout(() => S.panes.forEach(q => q.pages.forEach(g => g.ink && redrawInk(g))), 600));
 (async () => {
   const s = await kvGet('state');
   if (s && s.panes && s.panes.length) {
@@ -457,7 +527,7 @@ window.addEventListener('beforeunload', persist);
     for (const q of s.panes) {
       let pdf = null;
       if (q.kind === 'pdf' && q.bytes) { try { pdf = await pdfjs.getDocument({ data: q.bytes.slice(0), cMapUrl: 'pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: 'pdfjs/standard_fonts/', useSystemFonts: true, disableFontFace: true }).promise; } catch (e) { continue; } }
-      addPane(q.kind, q.name, q.pages, { bytes: q.bytes, pdf, zoom: q.zoom });
+      addPane(q.kind, q.name, q.pages, { bytes: q.bytes, pdf, zoom: q.zoom, proj: q.proj });
     }
     toast('تم استرجاع شغلك السابق');
   } else addPane('draft', 'مسودة', [{ w: A4[0], h: A4[1], strokes: [] }]);
