@@ -2,7 +2,7 @@ name: Build Engineer Pen Desktop (Windows)
 on:
   push:
     branches: [main]
-    paths: ['engineerpen-desktop/**', 'index.html', 'app.js', 'manifest.webmanifest', 'pdfjs/**', '.github/workflows/engineerpen-desktop.yml']
+    paths: ['engineerpen-desktop/**', 'index.html', 'app.js', 'manifest.webmanifest', 'pdfjs/**', 'ocr/**', '.github/workflows/engineerpen-desktop.yml']
   workflow_dispatch: {}
 permissions:
   contents: write
@@ -22,6 +22,7 @@ jobs:
           mkdir app
           cp ../index.html ../app.js ../manifest.webmanifest ../icon-192.png ../icon-512.png app/
           cp -r ../pdfjs app/pdfjs
+          cp -r ../ocr app/ocr
       - run: npm install
       - run: npx electron-builder --win nsis --publish never
         env:

@@ -21,7 +21,7 @@ jobs:
       - name: Web assets
         run: |
           mkdir www
-          cp index.html app.js manifest.webmanifest icon-192.png icon-512.png www/ && cp -r pdfjs www/
+          cp index.html app.js manifest.webmanifest icon-192.png icon-512.png www/ && cp -r pdfjs ocr www/
       - run: npm install
       - run: npx cap add android
       - name: Icons and version

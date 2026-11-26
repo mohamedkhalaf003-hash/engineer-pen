@@ -1,5 +1,6 @@
 import HERO from './hero.js';
 import { initSync } from './sync.js';
+import { strokesToCanvas, recognize } from './ocr.js';
 import * as pdfjs from 'pdfjs-dist/build/pdf.min.mjs';
 import { PDFDocument, rgb, LineCapStyle } from 'pdf-lib';
 import workerText from './worker.js';
@@ -11,7 +12,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([workerText],
 const $ = (s, r = document) => r.querySelector(s);
 const A4 = [595, 842], MAXP = 4;
 const COLORS = ['#e11d1d', '#111111', '#1d4ed8', '#16a34a', '#f59e0b'];
-const S = { tool: 'pen', color: COLORS[0], width: 0.0035, finger: false, orient: 'column', panes: [], active: null };
+const S = { mode: 'draw', lang: 'ara+eng', tool: 'pen', color: COLORS[0], width: 0.0035, finger: false, orient: 'column', panes: [], active: null };
 let uid = 0;
 
 /* ---------- IndexedDB autosave ---------- */
@@ -41,6 +42,8 @@ document.body.innerHTML = `
  <section class="bx"><h3>✏️ أدوات الرسم</h3><div class="tl">
   <button data-t="pen" class="on"><b>✏️</b><small>قلم</small></button>
   <button data-t="hl"><b>🖍</b><small>هايلايت</small></button>
+  <button data-a="mode" id="bm"><b>✍️</b><small>القلم: رسم</small></button>
+  <button data-a="lang" id="bl" hidden><b>🔤</b><small>لغة: عربي+EN</small></button>
   <button data-t="er"><b>🧽</b><small>ممحاة</small></button>
   <button data-a="undo"><b>↶</b><small>تراجع</small></button>
   <button data-a="finger" id="bf"><b>☝️</b><small>إصبع: لا</small></button>
@@ -217,7 +220,14 @@ async function renderPage(p, g) {
   }
   redrawInk(g);
 }
+const LN = { 'ara+eng': 'عربي+EN', eng: 'EN', ara: 'عربي' };
+function drawText(ctx, s, W, H, ox = 0, oy = 0) {
+  const fs = s.fs * W, lh = fs * 1.25; ctx.save(); ctx.fillStyle = s.c; ctx.font = fs + 'px Tahoma,"Noto Naskh Arabic","Segoe UI",Arial,sans-serif';
+  ctx.direction = s.r ? 'rtl' : 'ltr'; ctx.textAlign = s.r ? 'right' : 'left'; ctx.textBaseline = 'top';
+  const X = (s.r ? s.x + s.w : s.x) * W - ox; s.l.forEach((ln, i) => ctx.fillText(ln, X, s.y * H + i * lh - oy)); ctx.restore();
+}
 function drawStroke(ctx, s, W, H) {
+  if (s.t === 'tx') return drawText(ctx, s, W, H);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = s.c;
   ctx.globalAlpha = s.t === 'hl' ? 0.35 : 1;
   const pts = s.p;
@@ -246,7 +256,7 @@ function wireInput(p) {
       const g = pageAt(e) || p.pages.find(x => { const r = x.el.getBoundingClientRect(); return e.clientY >= r.top && e.clientY <= r.bottom; });
       if (!g) return;
       const erase = S.tool === 'er' || (e.buttons & 32);
-      cur = { g, erase, removed: [], s: erase ? null : { t: S.tool === 'hl' ? 'hl' : 'pen', c: S.color, w: S.tool === 'hl' ? S.width * 5 : S.width, p: [] } };
+      cur = { g, erase, removed: [], s: erase ? null : { k: S.mode === 'type' && S.tool === 'pen' ? 1 : undefined, t: S.tool === 'hl' ? 'hl' : 'pen', c: S.color, w: S.tool === 'hl' ? S.width * 5 : S.width, p: [] } };
       addPt(e);
     } else {
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -262,7 +272,7 @@ function wireInput(p) {
       if (cur.erase) {
         const W = g.ink.getBoundingClientRect().width, H = g.ink.getBoundingClientRect().height, rad = 14;
         g.strokes = g.strokes.filter((s, i) => {
-          const hit = s.p.some(q => Math.hypot((q[0] - x) * W, (q[1] - y) * H) < rad + s.w * W);
+          const hit = s.t === 'tx' ? (x >= s.x - .005 && x <= s.x + s.w + .005 && y >= s.y - .005 && y <= s.y + s.h + .005) : s.p.some(q => Math.hypot((q[0] - x) * W, (q[1] - y) * H) < rad + s.w * W);
           if (hit) cur.removed.push(s); return !hit;
         });
         redrawInk(g);
@@ -296,7 +306,7 @@ function wireInput(p) {
     if (cur) {
       const g = cur.g;
       if (cur.erase) { if (cur.removed.length) p.undo.push({ t: 'del', g, s: cur.removed }); }
-      else if (cur.s.p.length) { g.strokes.push(cur.s); p.undo.push({ t: 'add', g, s: cur.s }); }
+      else if (cur.s.p.length) { g.strokes.push(cur.s); p.undo.push({ t: 'add', g, s: cur.s }); if (cur.s.k) schedConv(g); }
       cur = null; autosave(); return;
     }
     if (touches.delete(e.pointerId) && touches.size === 0 && !pinch) {
@@ -335,7 +345,7 @@ async function exportPdf(p) {
       }
     });
   }
-  const pgs = doc.getPages();
+  const pgs = doc.getPages(), imgs = [];
   p.pages.forEach((g, i) => {
     const pg = pgs[i]; if (!pg || !g.strokes.length) return;
     const { width: w0, height: h0 } = pg.getSize(), r = ((pg.getRotation().angle % 360) + 360) % 360;
@@ -343,6 +353,10 @@ async function exportPdf(p) {
     const map = (u, v) => { const X = u * vw, Y = v * vh; return r === 0 ? { x: X, y: h0 - Y } : r === 90 ? { x: Y, y: X } : r === 180 ? { x: w0 - X, y: Y } : { x: w0 - Y, y: h0 - X }; };
     g.strokes.forEach(s => {
       const col = s.c, c = rgb(parseInt(col.slice(1, 3), 16) / 255, parseInt(col.slice(3, 5), 16) / 255, parseInt(col.slice(5, 7), 16) / 255);
+      if (s.t === 'tx') {
+        if (r) return; const cv = document.createElement('canvas'), K = 3, Wc = vw * K, Hc = vh * K; cv.width = Math.ceil(s.w * Wc) + 8; cv.height = Math.ceil(s.h * Hc) + 8;
+        drawText(cv.getContext('2d'), s, Wc, Hc, s.x * Wc - 4, s.y * Hc - 4); imgs.push([pg, cv, map(s.x, s.y + s.h), s.w * vw + 8 / K, s.h * vh + 8 / K]); return;
+      }
       const op = s.t === 'hl' ? .35 : 1;
       if (s.p.length === 1) { const a = map(s.p[0][0], s.p[0][1]); pg.drawCircle({ x: a.x, y: a.y, size: s.w * vw / 2, color: c, opacity: op }); return; }
       for (let k = 1; k < s.p.length; k++) {
@@ -351,6 +365,7 @@ async function exportPdf(p) {
       }
     });
   });
+  for (const [pg, cv, a, w, h] of imgs) { const im = await doc.embedPng(await new Promise(r => cv.toBlob(b => b.arrayBuffer().then(r), 'image/png'))); pg.drawImage(im, { x: a.x - 4 / 3, y: a.y - 4 / 3, width: w, height: h }); }
   return await doc.save();
 }
 async function savePane(share) {
@@ -378,14 +393,45 @@ async function savePane(share) {
     }
   } catch (e) { toast('فشل الحفظ: ' + e.message); }
 }
+let convT = null;
+function schedConv(g) { clearTimeout(convT); convT = setTimeout(() => convert(g), 1500); }
+async function convert(g, quiet) {
+  const old = g.strokes.filter(s => s.k); if (!old.length || g.busy) return; const p = S.active;
+  g.busy = true;
+  try {
+    const W = g.ink.width, H = g.ink.height, { canvas, x0, y0, bw, bh } = strokesToCanvas(old, W, H);
+    if (!quiet) toast('⏳ جارٍ التحويل لنص…');
+    const r = await recognize(canvas, S.lang);
+    const lines = r.text.split('\n').map(t => t.trim()).filter(Boolean);
+    const left = g.strokes.filter(s => s.k); // strokes added while recognizing stay pending
+    const still = left.filter(s => !old.includes(s));
+    if (!lines.length || r.conf < 25) { old.forEach(s => delete s.k); toast('ما قدرتش أقرأ الخط — سبته رسم (ثقة ' + Math.round(r.conf) + '%)'); }
+    else {
+      const rtl = (r.text.match(/[\u0600-\u06FF]/g) || []).length > (r.text.match(/[A-Za-z]/g) || []).length;
+      const fs = Math.min(.05, Math.max(.012, bh / W / lines.length / 1.25 * .9));
+      const ctx = g.ink.getContext('2d'); ctx.save(); ctx.font = fs * W + 'px Tahoma,Arial,sans-serif';
+      const tw = Math.max(...lines.map(l => ctx.measureText(l).width)) / W; ctx.restore();
+      const t = { t: 'tx', c: old[0].c, l: lines, r: rtl ? 1 : 0, fs: +fs.toFixed(4), x: +(rtl ? (x0 + bw) / W - tw : x0 / W).toFixed(4), y: +(y0 / H).toFixed(4), w: +tw.toFixed(4), h: +(lines.length * fs * 1.25 * W / H).toFixed(4) };
+      g.strokes = g.strokes.filter(s => !old.includes(s)); g.strokes.push(t);
+      if (p) p.undo.push({ t: 'conv', g, old, neu: t });
+      toast('✅ ' + lines.join(' / '));
+    }
+    redrawInk(g); autosave();
+    if (still.length) schedConv(g);
+  } catch (e) { old.forEach(s => delete s.k); toast('فشل التحويل: ' + e.message); redrawInk(g); }
+  g.busy = false;
+}
+function flushConv() { clearTimeout(convT); (S.active ? S.active.pages : []).forEach(g => { if (g.strokes.some(s => s.k)) convert(g, true); }); }
 function undo() {
   const p = S.active; if (!p) return; const o = p.undo.pop(); if (!o) return;
-  if (o.t === 'add') o.g.strokes = o.g.strokes.filter(s => s !== o.s); else o.g.strokes.push(...o.s);
+  if (o.t === 'add') o.g.strokes = o.g.strokes.filter(s => s !== o.s); else if (o.t === 'conv') { o.g.strokes = o.g.strokes.filter(s => s !== o.neu); o.g.strokes.push(...o.old); } else o.g.strokes.push(...o.s);
   redrawInk(o.g); autosave();
 }
 const fileIn = $('#file'); fileIn.onchange = () => { openPdfFiles([...fileIn.files]); fileIn.value = ''; };
 document.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
   const a = b.dataset.a;
+  if (a === 'mode') { flushConv(); S.mode = S.mode === 'draw' ? 'type' : 'draw'; b.querySelector('small').textContent = 'القلم: ' + (S.mode === 'draw' ? 'رسم' : 'كتابة'); b.classList.toggle('on', S.mode === 'type'); $('#bl').hidden = S.mode !== 'type'; if (S.mode === 'type') { setTool('pen'); toast('وضع الكتابة: اكتب بالقلم وبعد ثانية ونص هيتحول لحروف مطبوعة'); } }
+  if (a === 'lang') { const k = ['ara+eng', 'eng', 'ara']; S.lang = k[(k.indexOf(S.lang) + 1) % 3]; b.querySelector('small').textContent = 'لغة: ' + LN[S.lang]; }
   if (a === 'open') fileIn.click();
   if (a === 'draft') addPane('draft', 'مسودة', [{ w: A4[0], h: A4[1], strokes: [] }]);
   if (a === 'nb') addPane('nb', 'نوت بوك', [{ w: A4[0], h: A4[1], strokes: [] }]);
