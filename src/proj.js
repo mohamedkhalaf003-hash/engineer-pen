@@ -43,10 +43,11 @@ export const makeText = (g, text, x, y, o = {}) => {
 
 /* ---------- storage ---------- */
 import { PDFDocument } from 'pdf-lib';
+import { dxfSummary, dwgInfo } from './dxf.js';
 import { initRepoSync, hasLink, linkInfo, link as rsLink, unlink as rsUnlink } from './rsync.js';
 export const REVIEW = typeof APP_MODE !== 'undefined' && APP_MODE === 'review';
 const DT = typeof window !== 'undefined' ? window.desktop : null;
-const SECS = ['ref', 'in', 'out', 'ipc', 'boq', 'rep'];
+const SECS = ['ref', 'in', 'out', 'ipc', 'boq', 'drw', 'mat', 'rep'];
 let RS = null, mirrored = new Set();
 let api = null;
 const D = { projects: [], files: {}, stamps: [], gone: {}, cfg: { key: '', model: 'claude-sonnet-5-5', style: 'typed', disc: 'both' } };
@@ -118,6 +119,7 @@ html.native #pj{padding-top:max(env(safe-area-inset-top),40px);padding-bottom:ma
 #pj .bd{flex:1;overflow:auto;padding:12px}
 #pj h3{margin:14px 2px 8px;color:#7dd3c8;font-size:14px}
 #pj .gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+#pj .pt{position:relative;display:flex}#pj .pt>button{flex:1;padding-left:34px!important;padding-right:10px!important}#pj .pf{position:absolute;top:4px;left:4px;font-style:normal;font-size:16px;padding:4px 6px;border-radius:8px;background:#e2e8f0;opacity:.7;cursor:pointer}#pj .pf.on{background:#0f766e;opacity:1}
 #pj .gr button{padding:16px 8px;font-size:16px;background:#1e2d47;border:1px solid #2b3a55}
 #pj .tb{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}#pj .tb button{flex:1 1 30%;padding:10px 6px;font-size:14px}#pj .tb button.on{background:#2563eb}
 #pj .rw{display:flex;align-items:center;gap:6px;background:#162033;border:1px solid #2b3a55;border-radius:12px;padding:8px 10px;margin-bottom:8px}
@@ -165,13 +167,28 @@ function modal(html) {
 
 
 /* ---------- ربط الفولدرات (الكمبيوتر فقط) ---------- */
-const SECN = { ref: 'مراجع', in: 'مدخلات', out: 'مخرجات', ipc: 'مستخلصات', boq: 'جداول كميات', rep: 'تقارير' };
+const SECN = { ref: 'مراجع', in: 'مدخلات', out: 'مخرجات', ipc: 'مستخلصات', boq: 'جداول كميات', drw: 'مخططات', mat: 'مواد', rep: 'تقارير' };
 const pname = pid => (D.projects.find(x => x.id === pid) || {}).name || pid;
 async function mirrorOne(pid, sec, name, id, buf) {
   if (!DT) return;
   try { await DT.write(pid, pname(pid), SEC_K(sec), name, buf); mirrored.add(id); api.kvSet('pj:mir', [...mirrored]); } catch (e) { }
 }
 const SEC_K = sec => SECN[sec];
+const ALIAS = { 'عقد': 'ref', 'العقد': 'ref', 'مواصفات': 'ref', 'مراجع': 'ref', 'مدخلات': 'in', 'مخرجات': 'out', 'مستخلصات': 'ipc', 'جداول كميات': 'boq', 'كميات': 'boq', 'مخططات': 'drw', 'رسومات': 'drw', 'مواد': 'mat', 'اعتماد مواد': 'mat', 'تقارير': 'rep' };
+/* تحديد قسم الملف: اسم الفولدر الفرعي أولًا، وبعدين كلمات في اسم الملف، وبعدين نوعه */
+function classify(folder, name) {
+  const f = (folder || '').trim(); if (ALIAS[f]) return ALIAS[f];
+  const n = name.toLowerCase();
+  if (/\.(dxf|dwg)$/.test(n)) return 'drw';
+  if (/(عقد|contract|مواصفات|specification|\bspec\b|agreement)/.test(n)) return 'ref';
+  if (/(مستخلص|\bipc\b|payment|invoice|interim)/.test(n)) return 'ipc';
+  if (/(boq|كميات|bill of quantit)/.test(n)) return 'boq';
+  if (/(مخطط|رسم|drawing|shop|layout|as.?built)/.test(n)) return 'drw';
+  if (/(مادة|مواد|material|submittal|\bmar\b|datasheet|catalog)/.test(n)) return 'mat';
+  if (/(تقرير|report)/.test(n)) return 'rep';
+  if (/\.(xlsx|xls)$/.test(n)) return 'boq';
+  return 'in';
+}
 let fsBusy = false;
 async function folderSync(quiet) {
   if (!DT || fsBusy) return; fsBusy = true; let imp = 0;
@@ -182,13 +199,13 @@ async function folderSync(quiet) {
       for (const sec of SECS) for (const f of F[sec]) if (!mirrored.has(f.id)) { const b = await api.kvGet('pjf:' + f.id); if (b) await mirrorOne(p.id, sec, f.name, f.id, b); }
       const list = await DT.scan(p.id, p.name);
       for (const it of list) {
-        const sec = Object.keys(SECN).find(k => SECN[k] === it.sec); if (!sec) continue;
+        const sec = classify(it.sec, it.name); if (!sec) continue;
         const ex = F[sec].find(x => x.name === it.name);
         if (ex && (ex.size === it.size || it.mtime <= ex.t + 3000)) continue;
-        const buf = await DT.read(p.id, p.name, it.sec, it.name); if (!buf) continue;
+        const buf = await DT.read(p.id, p.name, it.rel); if (!buf) continue;
         const id = uid(); await api.kvSet('pjf:' + id, buf);
         if (ex) { api.kvSet('pjf:' + ex.id, null); bury(ex.id); F[sec].splice(F[sec].indexOf(ex), 1); }
-        F[sec].push({ id, name: it.name, size: buf.byteLength, type: /\.pdf$/i.test(it.name) ? 'application/pdf' : /\.(png|jpe?g)$/i.test(it.name) ? 'image/' + (/png$/i.test(it.name) ? 'png' : 'jpeg') : 'text/plain', t: Date.now() });
+        F[sec].push({ id, name: it.name, size: buf.byteLength, type: /\.pdf$/i.test(it.name) ? 'application/pdf' : /\.(png|jpe?g)$/i.test(it.name) ? 'image/' + (/png$/i.test(it.name) ? 'png' : 'jpeg') : /\.(xlsx|xls)$/i.test(it.name) ? 'application/vnd.ms-excel' : /\.(dxf|dwg)$/i.test(it.name) ? 'application/acad' : 'text/plain', t: Date.now() });
         mirrored.add(id); imp++;
       }
     }
@@ -202,12 +219,13 @@ async function pickRootFlow() {
 
 /* ---------- screens ---------- */
 let cur = { pid: null, sec: 'in' };
-const SEC = { ref: '📚 المراجع والعقد', in: '📥 المدخلات', out: '📤 المخرجات', ipc: '💰 المستخلصات', boq: '📊 جداول الكميات', rep: '📝 التقارير' };
-const SEC_HELP = { ref: 'العقد والمواصفات والمخططات المعتمدة والكود — الذكاء بيراجع وبيكتب التقارير على أساسها.', in: 'تقارير ومخططات المقاول اللي عاوز تراجعها.', out: 'الملفات المراجَعة والمعدّلة (بتتحفظ هنا تلقائي).', ipc: 'المستخلصات الشهرية والنهائية (PDF أو Excel).', boq: 'جداول الكميات (BOQ) — PDF أو Excel.', rep: 'التقارير اللي بيولّدها البرنامج، وأي تقرير تحط فيه بنفسك.' };
+const SEC = { ref: '📚 المراجع والعقد', in: '📥 المدخلات', out: '📤 المخرجات', ipc: '💰 المستخلصات', boq: '📊 جداول الكميات', drw: '📐 المخططات', mat: '🧱 المواد', rep: '📝 التقارير' };
+const SEC_HELP = { ref: 'العقد والمواصفات والمخططات المعتمدة والكود — الذكاء بيراجع وبيكتب التقارير على أساسها.', in: 'تقارير ومخططات المقاول اللي عاوز تراجعها.', out: 'الملفات المراجَعة والمعدّلة (بتتحفظ هنا تلقائي).', ipc: 'المستخلصات الشهرية والنهائية (PDF أو Excel).', boq: 'جداول الكميات (BOQ) — PDF أو Excel.', drw: 'المخططات: PDF أو AutoCAD. الأفضل DXF لأن البرنامج يقدر يقراه ويستخرج منه الطبقات والبلوكات والنصوص والأطوال (DWG بيتخزن بس ومش مقروء، صدّره DXF).', mat: 'طلبات اعتماد المواد (Material Submittals) ومواصفاتها وكتالوجاتها — اضغط 🤖 راجع علشان يتراجع على المواصفات والكميات والمخططات.', rep: 'التقارير اللي بيولّدها البرنامج، وأي تقرير تحط فيه بنفسك.' };
 function home() {
   cur.pid = null;
-  root.innerHTML = `<div class="hd"><h2>🗂 مراجعة المشاريع</h2><button data-h="sync" title="مزامنة">🔄</button>${DT ? '<button data-h="rootf" title="الفولدر الرئيسي">📁</button>' : ''}<button data-h="stamps">🖋 أختام</button><button data-h="cfg">⚙</button>${REVIEW ? '<button class="b" data-h="x">📄 المحرر</button>' : '<button class="r" data-h="x">✕</button>'}</div><div class="bd">${!hasLink() ? '<div class="rw" style="background:#fff7e0;border-color:#f0c040;color:#5b4300"><span>⚠ الجهاز مش مربوط — اربطه علشان المشاريع تظهر على الجوال واللابتوب</span><button class="g" data-h="cfg">اربط</button></div>' : ''}${GROUPS.map(([g, n]) => `<h3>${n}</h3><div class="gr">${D.projects.filter(p => p.group === g).map(p => `<button data-p="${p.id}">${esc(p.name)}</button>`).join('')}<button class="g" data-add="${g}">＋ مشروع</button></div>`).join('')}</div>`;
+  root.innerHTML = `<div class="hd"><h2>🗂 مراجعة المشاريع</h2><button data-h="sync" title="مزامنة">🔄</button>${DT ? '<button data-h="rootf" title="الفولدر الرئيسي">📁</button>' : ''}<button data-h="stamps">🖋 أختام</button><button data-h="cfg">⚙</button>${REVIEW ? '<button class="b" data-h="x">📄 المحرر</button>' : '<button class="r" data-h="x">✕</button>'}</div><div class="bd">${!hasLink() ? '<div class="rw" style="background:#fff7e0;border-color:#f0c040;color:#5b4300"><span>⚠ الجهاز مش مربوط — اربطه علشان المشاريع تظهر على الجوال واللابتوب</span><button class="g" data-h="cfg">اربط</button></div>' : ''}${GROUPS.map(([g, n]) => `<h3>${n}</h3><div class="gr">${D.projects.filter(p => p.group === g).map(p => `<div class="pt"><button data-p="${p.id}">${esc(p.name)}</button>${DT ? `<i class="pf" data-pf="${p.id}" title="اختيار فولدر المشروع">📁</i>` : ''}</div>`).join('')}<button class="g" data-add="${g}">＋ مشروع</button></div>`).join('')}</div>`;
   root.querySelectorAll('[data-p]').forEach(b => b.onclick = () => project(b.dataset.p));
+  root.querySelectorAll('[data-pf]').forEach(b => { DT.folder(b.dataset.pf, pname(b.dataset.pf)).then(f => { if (f) b.classList.add('on'); }); b.onclick = async e => { e.stopPropagation(); const pid = b.dataset.pf, r = await DT.pickFolder(pid, pname(pid)); if (r) { SECS.forEach(k => D.files[pid][k].forEach(f => mirrored.delete(f.id))); await folderSync(); api.toast('📁 اتربط: ' + r); home(); } }; });
   root.querySelectorAll('[data-add]').forEach(b => b.onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text"><button class="g" data-ok>إضافة</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { const p = { id: uid(), name: r.n.trim(), group: b.dataset.add, t: Date.now() }; D.projects.push(p); D.files[p.id] = Object.fromEntries(SECS.map(k => [k, []])); await save(); home(); } });
   root.querySelector('[data-h=x]').onclick = () => { root.hidden = true; };
   root.querySelectorAll('[data-h=cfg]').forEach(b => b.onclick = settings);
@@ -221,10 +239,10 @@ function project(pid, sec) {
   <div class="tb">${Object.entries(SEC).map(([k, n]) => `<button data-s="${k}" class="${k === cur.sec ? 'on' : ''}">${n} (${D.files[pid][k].length})</button>`).join('')}</div>
   <div class="sm">${SEC_HELP[cur.sec]}</div>
   <button class="b" data-rp="1" style="width:100%;margin-bottom:8px">📝 اعمل تقرير عن المشروع</button>
-  ${DT ? '<div class="rw" id="pjfold"><span>📁 <small id="pjpath">…</small></span><button data-h="fopen">فتح</button><button data-h="fpick">ربط فولدر</button><button data-h="fscan">🔄</button></div>' : ''}
+  ${DT ? '<div class="rw" id="pjfold"><span>📁 <small id="pjpath">…</small></span><button data-h="fopen">فتح</button><button data-h="fpick" class="g">📁 اختيار فولدر المشروع</button><button data-h="fscan">🔄</button></div>' : ''}
   <button class="g" data-up="1" style="width:100%;margin-bottom:10px">＋ رفع ملفات</button>
-  ${L.length ? L.map(f => `<div class="rw"><span>${isPdf(f) ? '📄' : /image/.test(f.type) ? '🖼' : /sheet|excel|csv|xls/i.test(f.type + f.name) ? '📊' : '📝'} ${esc(f.name)}<br><small>${sizeTxt(f.size)} • ${new Date(f.t).toLocaleDateString('ar-SA')}</small></span>
-   ${isPdf(f) ? `<button data-o="${f.id}">فتح</button>` : `<button data-dl="${f.id}">⬇</button>`}${cur.sec === 'in' && /pdf/i.test(f.type) ? `<button class="b" data-rv="${f.id}">🤖 راجع</button>` : ''}${(cur.sec === 'out' || cur.sec === 'rep') && isPdf(f) ? `<button data-sh="${f.id}">📤</button>` : ''}<button class="r" data-d="${f.id}">🗑</button></div>`).join('') : '<div class="sm">لا يوجد ملفات بعد.</div>'}</div>
+  ${L.length ? L.map(f => `<div class="rw"><span>${isPdf(f) ? '📄' : /\.(dxf|dwg)$/i.test(f.name) ? '📐' : /image/.test(f.type) ? '🖼' : /sheet|excel|csv|xls/i.test(f.type + f.name) ? '📊' : '📝'} ${esc(f.name)}<br><small>${sizeTxt(f.size)} • ${new Date(f.t).toLocaleDateString('ar-SA')}</small></span>
+   ${isPdf(f) ? `<button data-o="${f.id}">فتح</button>` : `<button data-dl="${f.id}">⬇</button>`}${['in', 'mat', 'drw'].includes(cur.sec) && isPdf(f) ? `<button class="b" data-rv="${f.id}">🤖 راجع</button>` : ''}${cur.sec === 'drw' && /\.dxf$/i.test(f.name) ? `<button class="b" data-dr="${f.id}">🤖 راجع المخطط</button>` : ''}${(cur.sec === 'out' || cur.sec === 'rep') && isPdf(f) ? `<button data-sh="${f.id}">📤</button>` : ''}<button class="r" data-d="${f.id}">🗑</button></div>`).join('') : '<div class="sm">لا يوجد ملفات بعد.</div>'}</div>
   <input type="file" id="pjup" multiple hidden>`;
   root.querySelector('[data-h=back]').onclick = home;
   if (DT) {
@@ -236,11 +254,12 @@ function project(pid, sec) {
   root.querySelector('[data-h=ren]').onclick = async () => { const r = await modal(`<label>اسم المشروع</label><input name="n" type="text" value="${esc(p.name)}"><button class="g" data-ok>حفظ</button><button data-x="">إلغاء</button>`); if (r && r.n.trim()) { p.name = r.n.trim(); p.t = Date.now(); await save(); project(pid); } };
   root.querySelector('[data-h=del]').onclick = async () => { if (confirm('حذف المشروع «' + p.name + '» وكل ملفاته؟')) { for (const k of SECS) for (const f of D.files[pid][k]) api.kvSet('pjf:' + f.id, null); bury(pid); for (const k of SECS) D.files[pid][k].forEach(f => bury(f.id)); D.projects = D.projects.filter(x => x.id !== pid); delete D.files[pid]; await save(); home(); } };
   root.querySelectorAll('[data-s]').forEach(b => b.onclick = () => project(pid, b.dataset.s));
-  const up = root.querySelector('#pjup'); up.accept = cur.sec === 'ref' ? '.pdf,.txt,.md,.png,.jpg,.jpeg,.csv,.xlsx,.xls' : (cur.sec === 'ipc' || cur.sec === 'boq') ? '.pdf,.xlsx,.xls,.csv' : 'application/pdf';
+  const up = root.querySelector('#pjup'); up.accept = cur.sec === 'ref' ? '.pdf,.txt,.md,.png,.jpg,.jpeg,.csv,.xlsx,.xls' : (cur.sec === 'ipc' || cur.sec === 'boq') ? '.pdf,.xlsx,.xls,.csv' : cur.sec === 'drw' ? '.pdf,.dxf,.dwg' : cur.sec === 'mat' ? '.pdf,.png,.jpg,.jpeg,.xlsx,.xls' : 'application/pdf';
   root.querySelector('[data-up]').onclick = () => up.click();
   up.onchange = async () => { api.toast('جارٍ الرفع…'); for (const f of up.files) await addFile(pid, cur.sec, f); await save(); project(pid); api.toast('تم الرفع ✔'); };
   root.querySelectorAll('[data-o]').forEach(b => b.onclick = () => openFile(pid, b.dataset.o));
   root.querySelector('[data-rp]').onclick = () => reportFlow(pid);
+  root.querySelectorAll('[data-dr]').forEach(b => b.onclick = () => reportFlow(pid, { kind: 'drawing', focus: L.find(x => x.id === b.dataset.dr).name }));
   root.querySelectorAll('[data-dl]').forEach(b => b.onclick = async () => { const f = L.find(x => x.id === b.dataset.dl), u = URL.createObjectURL(new Blob([await api.kvGet('pjf:' + f.id)])), a = document.createElement('a'); a.href = u; a.download = f.name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); });
   root.querySelectorAll('[data-rv]').forEach(b => b.onclick = () => reviewFlow(pid, b.dataset.rv));
   root.querySelectorAll('[data-sh]').forEach(b => b.onclick = async () => { const f = L.find(x => x.id === b.dataset.sh); api.deliver(new Uint8Array(await api.kvGet('pjf:' + f.id)), f.name.replace(/\.pdf$/i, ''), true); });
@@ -302,16 +321,12 @@ const DISC = { both: 'الكهرباء والميكانيكا', elec: 'الكه�
 async function callClaude(pid, fid, o) {
   const c = D.cfg; if (!c.key) throw new Error('حط مفتاح API الأول من ⚙ الإعدادات');
   const proj = D.projects.find(x => x.id === pid), content = []; let total = 0;
-  for (const f of D.files[pid].ref) {
-    const bytes = await api.kvGet('pjf:' + f.id); if (!bytes) continue; const u8 = new Uint8Array(bytes); total += u8.length;
-    if (/pdf/i.test(f.type)) content.push({ type: 'document', title: 'مرجع: ' + f.name, source: { type: 'base64', media_type: 'application/pdf', data: b64(u8) } });
-    else if (/^image\/(png|jpe?g)/.test(f.type)) content.push({ type: 'image', source: { type: 'base64', media_type: f.type.replace('jpg', 'jpeg'), data: b64(u8) } });
-    else content.push({ type: 'text', text: '--- مرجع: ' + f.name + ' ---\n' + new TextDecoder().decode(u8).slice(0, 200000) });
-  }
-  const inf = D.files[pid].in.find(x => x.id === fid), inb = new Uint8Array(await api.kvGet('pjf:' + fid)); total += inb.length;
+  const refSecs = ['ref', 'boq'].concat(o.kind === 'material' ? ['drw'] : o.kind === 'drawing' ? [] : []);
+  for (const sec of refSecs) for (const f of D.files[pid][sec]) { if (f.id === fid) continue; const r = await fileBlock(f, 'مرجع (' + SECN[sec] + '): ' + f.name); if (r) { total += r.n; content.push(r.b); } }
+  const inf = ['in', 'mat', 'drw'].flatMap(k => D.files[pid][k]).find(x => x.id === fid), inb = new Uint8Array(await api.kvGet('pjf:' + fid)); total += inb.length;
   if (total > 30 * 1048576) throw new Error('حجم الملفات كبير (' + sizeTxt(total) + ') — الحد حوالي 30MB. قلّل المراجع.');
   content.push({ type: 'document', title: 'الملف المراد مراجعته: ' + inf.name, source: { type: 'base64', media_type: 'application/pdf', data: b64(inb) } });
-  content.push({ type: 'text', text: `المشروع: ${proj.name}\nالتخصص: ${DISC[o.disc]}\nراجع الملف الأخير («${inf.name}») على أساس ملفات المراجع أعلاه (وكود البناء السعودي والأكواد المعتمدة لما المرجع ما يغطيش النقطة).${o.extra ? '\nتعليمات إضافية من المهندس: ' + o.extra : ''}\nسلّم النتيجة عبر الأداة submit_review.` });
+  content.push({ type: 'text', text: `المشروع: ${proj.name}\nالتخصص: ${DISC[o.disc]}\n${o.kind === 'material' ? 'ده طلب اعتماد مادة: راجع المادة المقترحة' : o.kind === 'drawing' ? 'ده مخطط: راجعه' : 'راجع الملف'} الأخير («${inf.name}») على أساس ملفات المراجع أعلاه (وكود البناء السعودي والأكواد المعتمدة لما المرجع ما يغطيش النقطة).${o.extra ? '\nتعليمات إضافية من المهندس: ' + o.extra : ''}\nسلّم النتيجة عبر الأداة submit_review.` });
   const system = `أنت مهندس استشاري سعودي خبير في ${DISC[o.disc]}، بتراجع تقارير ومخططات المقاولين نيابة عن المهندس محمد خلف (مهندس كهرباء، الرياض).
 القواعد:
 - راجع الملف على أساس المراجع المرفقة فقط، ولو النقطة مش مغطاة فيها استند للكود السعودي SBC أو الأكواد المعتمدة وقول المرجع في الملاحظة.
@@ -319,7 +334,7 @@ async function callClaude(pid, fid, o) {
 - كل ملاحظة: جملة أو جملتين بالعربية بأسلوب استشاري مباشر وقوي (مثال: «يُلتزم بمقاس الكابل المعتمد بالمخططات.»)، من غير مقدمات.
 - حدد صفحة الملاحظة وصندوق box حول العنصر المقصود بنسب الصفحة (من أعلى يسار الصفحة).
 - ركّز على الملاحظات المؤثرة (مطابقة المواصفات والكميات والموديلات والمقاسات والحسابات والاعتمادات). ما تكررش نفس الملاحظة، وحد أقصى 25 ملاحظة.
-- القرار: approved لو مفيش ملاحظات جوهرية، approved_as_noted لو ملاحظات بسيطة، revise_resubmit لو ملاحظات جوهرية، rejected لو مخالف للمواصفات.`;
+${o.kind === 'material' ? '- ده طلب اعتماد مواد: قارن الماركة والموديل والمواصفات والقدرات والشهادات وبلد المنشأ بالمواصفات والكميات والمخططات، وحدد البيانات الناقصة.\n' : o.kind === 'drawing' ? '- ده مخطط: راجع المطابقة للعقد والمواصفات والكميات، المقياس والرموز واللوحة الرئيسية، التنسيق بين الأنظمة والأخطاء الواضحة.\n' : ''}- القرار: approved لو مفيش ملاحظات جوهرية، approved_as_noted لو ملاحظات بسيطة، revise_resubmit لو ملاحظات جوهرية، rejected لو مخالف للمواصفات.`;
   const body = { model: c.model, max_tokens: 8000, system, tools: [TOOL], tool_choice: { type: 'tool', name: 'submit_review' }, messages: [{ role: 'user', content }] };
   const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 600000);
   let r;
@@ -364,7 +379,7 @@ function applyReview(pane, res, style) {
   }
 }
 /* ---------- التقارير ---------- */
-const RTYPES = { general: 'تقرير عام عن المشروع (نظرة شاملة)', contract: 'ملخص العقد وشروطه', qty: 'تقرير الكميات (جداول الكميات)', ipc: 'تقرير المستخلصات والموقف المالي', custom: 'تقرير مخصص (أكتب طلبي)' };
+const RTYPES = { general: 'تقرير عام عن المشروع (نظرة شاملة)', contract: 'ملخص العقد وشروطه', qty: 'تقرير الكميات (جداول الكميات)', ipc: 'تقرير المستخلصات والموقف المالي', drawing: 'مراجعة المخططات (مطابقة العقد والمواصفات والكميات)', material: 'مراجعة المواد (مطابقة المواصفات والكميات والمخططات)', custom: 'تقرير مخصص (أكتب طلبي)' };
 const RTOOL = {
   name: 'submit_report', description: 'تسليم التقرير النهائي', input_schema: { type: 'object', required: ['title', 'sections'], properties: {
     title: { type: 'string' }, subtitle: { type: 'string' },
@@ -380,14 +395,22 @@ async function sheetText(u8, name) {
     return t.slice(0, 250000);
   } catch (e) { return '(تعذّر قراءة ملف Excel ' + name + ')'; }
 }
+async function fileBlock(f, lab) {
+  const bytes = await api.kvGet('pjf:' + f.id); if (!bytes) return null; const u8 = new Uint8Array(bytes);
+  if (/\.(xlsx|xls)$/i.test(f.name) || /sheet|excel/i.test(f.type || '')) { const t = await sheetText(u8, f.name); return { b: { type: 'text', text: '--- ' + lab + ' (جدول) ---\n' + t }, n: t.length }; }
+  if (/\.dxf$/i.test(f.name)) { const t = dxfSummary(bytes, f.name); return { b: { type: 'text', text: '--- ' + lab + ' (ملخص مخطط AutoCAD مستخرج من DXF) ---\n' + t }, n: t.length }; }
+  if (/\.dwg$/i.test(f.name)) { const t = dwgInfo(u8, f.name); return { b: { type: 'text', text: '--- ' + lab + ' ---\n' + t }, n: t.length }; }
+  if (isPdf(f)) return { b: { type: 'document', title: lab, source: { type: 'base64', media_type: 'application/pdf', data: b64(u8) } }, n: u8.length, big: 1 };
+  if (/^image\/(png|jpe?g)/.test(f.type || '')) return { b: { type: 'image', source: { type: 'base64', media_type: f.type.replace('jpg', 'jpeg'), data: b64(u8) } }, n: u8.length, big: 1 };
+  if (/text|csv|markdown/i.test(f.type || '') || /\.(txt|md|csv)$/i.test(f.name)) { const t = new TextDecoder().decode(u8).slice(0, 200000); return { b: { type: 'text', text: '--- ' + lab + ' ---\n' + t }, n: t.length }; }
+  return null;
+}
 async function reportContent(pid) {
   const content = [], used = []; let total = 0;
-  for (const sec of ['ref', 'boq', 'ipc', 'in']) for (const f of D.files[pid][sec]) {
-    const bytes = await api.kvGet('pjf:' + f.id); if (!bytes) continue; const u8 = new Uint8Array(bytes), lab = SECN[sec] + ': ' + f.name;
-    if (/\.(xlsx|xls)$/i.test(f.name) || /sheet|excel/i.test(f.type)) { const t = await sheetText(u8, f.name); content.push({ type: 'text', text: '--- ' + lab + ' (جدول) ---\n' + t }); total += t.length; used.push(lab); }
-    else if (isPdf(f)) { total += u8.length; if (total > 30 * 1048576) throw new Error('حجم ملفات المشروع كبير (' + sizeTxt(total) + '). الحد حوالي 30MB — احذف ملفات مش لازمة أو قسّم الطلب.'); content.push({ type: 'document', title: lab, source: { type: 'base64', media_type: 'application/pdf', data: b64(u8) } }); used.push(lab); }
-    else if (/^image\/(png|jpe?g)/.test(f.type)) { total += u8.length; content.push({ type: 'image', source: { type: 'base64', media_type: f.type.replace('jpg', 'jpeg'), data: b64(u8) } }); used.push(lab); }
-    else if (/text|csv|markdown/i.test(f.type) || /\.(txt|md|csv)$/i.test(f.name)) { const t = new TextDecoder().decode(u8).slice(0, 200000); content.push({ type: 'text', text: '--- ' + lab + ' ---\n' + t }); used.push(lab); }
+  for (const sec of ['ref', 'boq', 'ipc', 'drw', 'mat', 'in']) for (const f of D.files[pid][sec]) {
+    const lab = SECN[sec] + ': ' + f.name, r = await fileBlock(f, lab); if (!r) continue;
+    total += r.n; if (total > 30 * 1048576) throw new Error('حجم ملفات المشروع كبير (' + sizeTxt(total) + '). الحد حوالي 30MB — احذف ملفات مش لازمة أو قسّم الطلب.');
+    content.push(r.b); used.push(lab);
   }
   return { content, used };
 }
@@ -395,7 +418,7 @@ async function callReport(pid, o) {
   const c = D.cfg; if (!c.key) throw new Error('حط مفتاح API الأول من ⚙ الإعدادات');
   const proj = D.projects.find(x => x.id === pid), { content, used } = await reportContent(pid);
   if (!content.length) throw new Error('مفيش ملفات في المشروع — ارفع العقد وجداول الكميات الأول.');
-  const ask = { general: 'اكتب تقريرًا عامًا شاملًا عن المشروع: نبذة عن المشروع والأطراف، نطاق الأعمال، قيمة العقد ومدته وتواريخه، أهم شروط العقد (الدفعات، الغرامات، الضمان، الاستقطاعات)، ملخص الكميات والبنود الرئيسية وقيمتها، موقف المستخلصات إن وُجدت، أهم المخاطر والملاحظات.', contract: 'لخّص العقد بالتفصيل: الأطراف، النطاق، القيمة، المدة، شروط الدفع، الغرامات، الضمانات، الاستقطاعات، التغييرات والمطالبات، إنهاء العقد، وأي شروط خاصة أو مخاطر.', qty: 'اكتب تقريرًا عن الكميات: ملخص جداول الكميات حسب القسم/النظام، أهم البنود وكمياتها وأسعارها وإجمالياتها كما وردت، ومقارنة بين الجداول إن تعددت، وأي ملاحظات على البنود (غياب سعر، اختلاف وحدة، تكرار).', ipc: 'اكتب تقريرًا عن المستخلصات: رقم كل مستخلص وتاريخه وقيمته والإجمالي التراكمي والنسبة المنفذة من قيمة العقد والاستقطاعات والمبلغ الصافي، وأي ملاحظات.', custom: o.extra || '' }[o.kind] + (o.kind !== 'custom' && o.extra ? '\nتعليمات إضافية من المهندس: ' + o.extra : '');
+  const ask = { general: 'اكتب تقريرًا عامًا شاملًا عن المشروع: نبذة عن المشروع والأطراف، نطاق الأعمال، قيمة العقد ومدته وتواريخه، أهم شروط العقد (الدفعات، الغرامات، الضمان، الاستقطاعات)، ملخص الكميات والبنود الرئيسية وقيمتها، موقف المستخلصات إن وُجدت، أهم المخاطر والملاحظات.', contract: 'لخّص العقد بالتفصيل: الأطراف، النطاق، القيمة، المدة، شروط الدفع، الغرامات، الضمانات، الاستقطاعات، التغييرات والمطالبات، إنهاء العقد، وأي شروط خاصة أو مخاطر.', qty: 'اكتب تقريرًا عن الكميات: ملخص جداول الكميات حسب القسم/النظام، أهم البنود وكمياتها وأسعارها وإجمالياتها كما وردت، ومقارنة بين الجداول إن تعددت، وأي ملاحظات على البنود (غياب سعر، اختلاف وحدة، تكرار).', ipc: 'اكتب تقريرًا عن المستخلصات: رقم كل مستخلص وتاريخه وقيمته والإجمالي التراكمي والنسبة المنفذة من قيمة العقد والاستقطاعات والمبلغ الصافي، وأي ملاحظات.', drawing: 'راجع المخططات بالمشروع' + (o.focus ? ' وركّز على الملف «' + o.focus + '»' : '') + ': مطابقتها للعقد والمواصفات وجداول الكميات، الطبقات والبلوكات والتاجات والأطوال المستخرجة من DXF، أخطاء أو نواقص أو تعارضات بين الأنظمة، بنود ناقصة أو زائدة عن الكميات، ملاحظات تنفيذية. اذكر كل ملاحظة بمرجعها (طبقة/بلوك/نص/بند).', material: 'راجع طلبات اعتماد المواد بالمشروع: مطابقة كل مادة (الماركة/الموديل/المواصفات الفنية/القدرات/الشهادات/المعايير/بلد المنشأ) للمواصفات وجداول الكميات والمخططات، البيانات والشهادات الناقصة، وأعطِ توصية لكل مادة (معتمدة / معتمدة بملاحظات / تُعاد / مرفوضة) في جدول.', custom: o.extra || '' }[o.kind] + (o.kind !== 'custom' && o.extra ? '\nتعليمات إضافية من المهندس: ' + o.extra : '');
   content.push({ type: 'text', text: `المشروع: ${proj.name}\nالملفات المرفقة: ${used.join(' | ')}\n\nالمطلوب: ${ask}\n\nسلّم التقرير عبر الأداة submit_report.` });
   const system = `أنت مهندس استشاري سعودي بتكتب تقارير هندسية وتعاقدية للمهندس محمد خلف (مهندس كهرباء، الرياض).
 القواعد الصارمة:
@@ -454,15 +477,15 @@ async function renderReport(res, projName) {
   }
   return await pdf.save();
 }
-async function reportFlow(pid) {
+async function reportFlow(pid, preset) {
   const c = D.cfg; if (!c.key) { api.toast('حط مفتاح API الأول'); return settings(); }
   const p = D.projects.find(x => x.id === pid), n = SECS.filter(k => k !== 'rep').reduce((a, k) => a + D.files[pid][k].length, 0);
-  const o = await modal(`<h3 style="margin:0 0 8px">📝 تقرير عن «${esc(p.name)}»</h3>
+  const o = preset ? { extra: '' } : await modal(`<h3 style="margin:0 0 8px">📝 تقرير عن «${esc(p.name)}»</h3>
   <div class="sm">هيتكتب من ${n} ملف في المشروع (عقد، كميات، مستخلصات، مدخلات) ومن غير ما يخترع أي رقم. بياخد من نص دقيقة لكام دقيقة وبيتحاسب من حسابك.</div>
   <label>نوع التقرير</label><select name="kind">${Object.entries(RTYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
   <label>طلبك / تفاصيل إضافية (اختياري، ومطلوب في المخصص)</label><textarea name="extra" rows="3" placeholder="مثال: ركز على بنود الإنارة وشروط الدفع، أو: قارن الكميات بالمستخلص رقم 2"></textarea>
   <button class="g" data-ok>ابدأ</button><button data-x="">إلغاء</button>`);
-  if (!o) return; if (o.kind === 'custom' && !o.extra.trim()) return api.toast('اكتب طلبك للتقرير المخصص');
+  if (!o) return; if (preset) Object.assign(o, preset); if (o.kind === 'custom' && !o.extra.trim()) return api.toast('اكتب طلبك للتقرير المخصص');
   api.toast('⏳ جارٍ كتابة التقرير… ممكن ياخد كام دقيقة'); root.querySelector('[data-rp]') && (root.querySelector('[data-rp]').disabled = true);
   try {
     const res = await callReport(pid, o), pdf = await renderReport(res, p.name);
@@ -473,21 +496,20 @@ async function reportFlow(pid) {
 async function reviewFlow(pid, fid) {
   const c = D.cfg;
   if (!c.key) { api.toast('حط مفتاح API الأول'); return settings(); }
-  const f = D.files[pid].in.find(x => x.id === fid);
+  const rsec = ['in', 'mat', 'drw'].find(k => D.files[pid][k].some(x => x.id === fid)), f = D.files[pid][rsec].find(x => x.id === fid), kind = { in: 'report', mat: 'material', drw: 'drawing' }[rsec];
   const o = await modal(`<h3 style="margin:0 0 8px">🤖 مراجعة «${esc(f.name)}»</h3>
   <div class="sm" style="color:#93a3bf;font-size:12px">هيراجع على ${D.files[pid].ref.length} ملف مرجعي. المراجعة بتاخد من نص دقيقة لكام دقيقة وبتتحاسب من حسابك.</div>
   <label>كتابة الملاحظات</label><select name="style"><option value="typed">مطبوعة</option><option value="hand">خط يد</option></select>
   <label>التخصص</label><select name="disc"><option value="both">كهرباء وميكانيكا</option><option value="elec">كهرباء</option><option value="mech">ميكانيكا</option></select>
   <label>تعليمات إضافية (اختياري)</label><textarea name="extra" rows="2" placeholder="مثال: ركز على الكابلات ولوحات التوزيع"></textarea>
   <button class="g" data-ok>ابدأ المراجعة</button><button data-x="">إلغاء</button>`);
-  if (!o) return;
-  const sel = root._m; // (modal already closed)
+  if (!o) return; o.kind = kind;
   c.style = o.style; c.disc = o.disc; api.S.nstyle = o.style; save();
   root.hidden = true; api.toast('⏳ جارٍ المراجعة… ممكن تاخد كام دقيقة');
   try {
     const res = await callClaude(pid, fid, o);
     const bytes = await api.kvGet('pjf:' + fid);
-    const pane = await api.openBytes(bytes.slice(0), f.name.replace(/\.pdf$/i, '') + '-مراجعة.pdf', { pid, sec: 'in', fid, review: true });
+    const pane = await api.openBytes(bytes.slice(0), f.name.replace(/\.pdf$/i, '') + '-مراجعة.pdf', { pid, sec: rsec, fid, review: true });
     if (!pane) return;
     await fontsReady; applyReview(pane, res, o.style); pane.pages.forEach(g => api.redraw(g)); api.autosave();
     api.toast(`✅ ${DECISION[res.decision] || ''} — ${(res.notes || []).length} ملاحظة. راجعها وعدّل (أداة تحديد)، وبعدين 💾 حفظ`);
@@ -498,7 +520,7 @@ export async function initProj(a) {
   api = a; css(); await load(); a.S.nstyle = D.cfg.style;
   root = document.createElement('div'); root.id = 'pj'; root.hidden = true; document.body.appendChild(root);
   RS = initRepoSync({ D, secs: SECS, save, kvGet: k => api.kvGet(k), kvSet: (k, v) => api.kvSet(k, v), toast: m => api.toast(m), rerender: () => { if (!root.hidden) cur.pid ? project(cur.pid) : home(); }, after: () => folderSync(true) });
-  if (DT) { addEventListener('focus', () => folderSync(true)); setTimeout(async () => { if (!(await DT.getRoot())) { const r = await modal(`<h3 style="margin:0 0 8px">📁 فولدر المشاريع على الكمبيوتر</h3><div class="sm">اختار فولدر (مثلاً على D: مش C:). هيتعمل جواه فولدر لكل مشروع، وأي ملف تضيفه أو تعدّله في البرنامج بيتكتب فيه تلقائي، وأي ملف تحطه في الفولدر بيظهر في البرنامج.</div><button class="g" data-x="pick">اختيار الفولدر</button><button data-x="">بعدين</button>`); if (r === 'pick') await pickRootFlow(); } else folderSync(true); }, 1200); }
+  if (DT) { addEventListener('focus', () => folderSync(true)); setInterval(() => folderSync(true), 30000); setTimeout(async () => { if (!(await DT.getRoot())) { const r = await modal(`<h3 style="margin:0 0 8px">📁 فولدر المشاريع على الكمبيوتر</h3><div class="sm">اختار فولدر (مثلاً على D: مش C:). هيتعمل جواه فولدر لكل مشروع، وأي ملف تضيفه أو تعدّله في البرنامج بيتكتب فيه تلقائي، وأي ملف تحطه في الفولدر بيظهر في البرنامج.</div><button class="g" data-x="pick">اختيار الفولدر</button><button data-x="">بعدين</button>`); if (r === 'pick') await pickRootFlow(); } else folderSync(true); }, 1200); }
   if (hasLink()) setTimeout(() => RS.run(false), 2500);
   return { open: () => { root.hidden = false; cur.pid ? project(cur.pid) : home(); }, addOutput, pickStamp };
 }

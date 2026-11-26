@@ -19,7 +19,7 @@ function serve(port) {
   });
 }
 /* ---- ربط الفولدرات ---- */
-const SECS = ['مراجع', 'مدخلات', 'مخرجات', 'مستخلصات', 'جداول كميات', 'تقارير'], EXT = /\.(pdf|png|jpe?g|txt|md|csv|xlsx|xls)$/i;
+const SECS = ['مراجع', 'مدخلات', 'مخرجات', 'مستخلصات', 'جداول كميات', 'مخططات', 'مواد', 'تقارير'], EXT = /\.(pdf|png|jpe?g|txt|md|csv|xlsx|xls|dxf|dwg)$/i;
 const cfgFile = () => path.join(app.getPath('userData'), 'folders.json');
 const cfg = () => { try { return Object.assign({ root: '', map: {} }, JSON.parse(fs.readFileSync(cfgFile(), 'utf8'))); } catch (e) { return { root: '', map: {} }; } };
 const saveCfg = c => { fs.mkdirSync(path.dirname(cfgFile()), { recursive: true }); fs.writeFileSync(cfgFile(), JSON.stringify(c)); };
@@ -45,17 +45,21 @@ ipcMain.handle('write', (e, pid, name, sec, fname, buf) => {
   const d = secDir(pid, name, sec); if (!d) return null;
   const fp = path.join(d, path.basename(clean(fname))); fs.writeFileSync(fp, Buffer.from(buf)); return fp;
 });
-ipcMain.handle('scan', (e, pid, name) => {
-  const out = [];
-  for (const sec of SECS) {
-    const d = secDir(pid, name, sec); if (!d) continue;
-    for (const n of fs.readdirSync(d)) { if (!EXT.test(n) || n.startsWith('~$')) continue; try { const st = fs.statSync(path.join(d, n)); if (st.isFile()) out.push({ sec, name: n, size: st.size, mtime: st.mtimeMs }); } catch (e) { } }
+const SKIP = /^(node_modules|\.git|\$RECYCLE\.BIN|System Volume Information)$/i;
+function walk(base, dir, depth, out) {
+  let items; try { items = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+  for (const it of items) {
+    if (it.name.startsWith('.') || it.name.startsWith('~$') || SKIP.test(it.name)) continue;
+    const fp = path.join(dir, it.name);
+    if (it.isDirectory()) { if (depth < 4) walk(base, fp, depth + 1, out); continue; }
+    if (!EXT.test(it.name) || out.length > 3000) continue;
+    try { const st = fs.statSync(fp), rel = path.relative(base, fp); out.push({ sec: rel.includes(path.sep) ? rel.split(path.sep)[0] : '', rel, name: it.name, size: st.size, mtime: st.mtimeMs }); } catch (e) { }
   }
-  return out;
-});
-ipcMain.handle('read', (e, pid, name, sec, fname) => {
-  const d = secDir(pid, name, sec); if (!d) return null;
-  try { const b = fs.readFileSync(path.join(d, path.basename(fname))); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); } catch (e) { return null; }
+}
+ipcMain.handle('scan', (e, pid, name) => { const d = projDir(pid, name); if (!d || !fs.existsSync(d)) return []; const out = []; walk(d, d, 0, out); return out; });
+ipcMain.handle('read', (e, pid, name, rel) => {
+  const d = projDir(pid, name); if (!d) return null; const fp = path.normalize(path.join(d, rel)); if (!fp.startsWith(path.normalize(d + path.sep))) return null;
+  try { const b = fs.readFileSync(fp); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); } catch (e) { return null; }
 });
 ipcMain.handle('open', (e, pid, name) => { const d = projDir(pid, name); if (!d) return; fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
 /* ---- تحديث مباشر من GitHub بدون متصفح ---- */
