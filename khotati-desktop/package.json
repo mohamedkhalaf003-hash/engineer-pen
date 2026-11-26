@@ -15,6 +15,7 @@
     "productName": "Khotati",
     "files": [
       "main.js",
+      "preload.js",
       "app/**/*"
     ],
     "icon": "icon.png",

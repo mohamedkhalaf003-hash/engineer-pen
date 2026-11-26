@@ -37,8 +37,8 @@ S = S || {};
 for (const k of ['track', 'books', 'series', 'weeks', 'batches']) S[k] = S[k] || {};
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } };
 
-for (const k of ['ev']) S[k] = S[k] || {};
-S.set = Object.assign({ city: 'riyadh', pre: 10, n: { pray: true, tasks: true, adhkar: true, ev: true, log: true } }, S.set || {});
+for (const k of ['ev', 'acts', 'ad']) S[k] = S[k] || {};
+S.set = Object.assign({ city: 'riyadh', pre: 10, preT: 10, daily: '', n: { pray: true, tasks: true, adhkar: true, ev: true, log: true } }, S.set || {});
 const D = (S.custom && S.custom.books && S.custom.weeks) ? S.custom : DATA0;
 let PLAN = D.plan || DATA0.plan;
 PLAN.forEach((p, i) => { p.revit = i < 6 ? 'Revit' : ''; p.taf = i < 6 ? 'تفريغ دروس' : ''; });
@@ -121,6 +121,39 @@ function extra(it, di, k, t) {
   }
   return '';
 }
+
+/* ---------- daily activities ---------- */
+const normD = s => String(s || '').replace(/[٠-٩]/g, c => '٠١٢٣٤٥٦٧٨٩'.indexOf(c)).replace(/[۰-۹]/g, c => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c));
+const fmMin = m => { const h = Math.floor(m / 60), mm = m % 60, h12 = h % 12 || 12; return h12 + ':' + String(mm).padStart(2, '0') + ' ' + (h < 12 ? 'ص' : 'م'); };
+function parseActs(txt) {
+  return normD(txt).split(/\n/).map(l => l.trim()).filter(Boolean).map(l => {
+    let m = l.match(/^(\d{1,2})\s*[:.]\s*(\d{2})(?:\s*(ص|م|am|pm)(?=\s|$|[-–:،.]))?/i), h, mi, sfx, rest;
+    if (m) { h = +m[1]; mi = +m[2]; sfx = m[3]; rest = l.slice(m[0].length); }
+    else { m = l.match(/^(\d{1,2})\s*(ص|م|am|pm)(?=\s|$|[-–:،])/i); if (m) { h = +m[1]; mi = 0; sfx = m[2]; rest = l.slice(m[0].length); } }
+    if (m === null || h > 23 || mi > 59) return { min: null, title: l };
+    if (sfx) { const pm = /^(م|pm)$/i.test(sfx); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; }
+    rest = rest.replace(/^\s*[-–—~]\s*\d{1,2}(\s*[:.]\s*\d{2})?(?:\s*(ص|م|am|pm)(?=\s|$|[-–:،.]))?/i, '').replace(/^[\s\-–—:،.]+/, '').trim();
+    return { min: h * 60 + mi, title: rest || 'نشاط' };
+  });
+}
+function dayActs(key) {
+  const f = parseActs(S.set.daily).map(a => ({ ...a, src: 'f' })), o = parseActs((S.acts || {})[key]).map(a => ({ ...a, src: 'd' }));
+  return [...f, ...o].sort((a, b) => (a.min ?? 9999) - (b.min ?? 9999));
+}
+const actKey = (key, a) => key + '|' + a.min + '|' + a.title;
+function actListHTML(key) {
+  const L = dayActs(key);
+  if (!L.length) return '<div class="sm">لا توجد أنشطة بعد — اكتب في الخانة تحت: سطر لكل نشاط والوقت أولًا، مثال: 6:30 ص مشي</div>';
+  return L.map((a, i) => { const k = actKey(key, a), dn = S.ad[k]; return `<div class="ar${dn ? ' dn2' : ''}"><button class="ak" data-ad="${i}">${dn ? '✔' : '○'}</button><b>${a.min == null ? '—' : fmMin(a.min)}</b><span>${esc(a.title)}</span><i>${a.src === 'f' ? 'كل يوم' : 'اليوم'}${a.min == null ? ' • بدون تنبيه' : ''}</i></div>`; }).join('');
+}
+function actCard(key) {
+  return `<div class="card ac"><b>📌 أنشطتي اليومية</b><div id="actl">${actListHTML(key)}</div>
+<div class="sm">أنشطة هذا اليوم فقط — سطر لكل نشاط، الوقت أولًا (ص/م أو 24 ساعة) ويصلك تنبيه به وقبله بـ ${S.set.preT || 0} دقائق:</div>
+<textarea id="actd" rows="3" placeholder="6:30 ص مشي&#10;5:00 م اجتماع&#10;20:15 مكالمة">${esc((S.acts || {})[key] || '')}</textarea>
+<details><summary>🔁 أنشطة ثابتة تتكرر كل يوم</summary><textarea id="actf" rows="4" placeholder="9:00 ص أذكار&#10;10:00 م نوم">${esc(S.set.daily || '')}</textarea></details></div>`;
+}
+const notifBanner = () => (NI.perm && NI.perm !== 'granted' && NI.perm !== 'unsupported') ? `<button class="nb" data-nfix="1">🔕 التنبيهات غير مفعّلة — اضغط هنا لتفعيلها</button>` : '';
+
 function vToday() {
   const d = parse(cur), di = dIdx(d), p = PLAN[di], t = S.track[cur] || { s: {}, n: '' };
   const pct = dayPct(cur), y = iso(addDays(d, -1)), yp = dayPct(y);
@@ -129,11 +162,13 @@ function vToday() {
   return `
 <div class="dn"><button data-nav="-1">‹</button><div><b>${DAYS[di]}</b><small>${fmt(d)}${isToday ? ' • اليوم' : ''}</small></div><button data-nav="1">›</button></div>
 ${isToday ? '' : '<button class="tdy" data-nav="0">العودة لليوم</button>'}
+${notifBanner()}
 <div class="ban"><img src="hero.jpg" alt=""><div class="ov"><div class="dl"><b>${hij(d)}</b><span>${fmt(d)} ${d.getFullYear()} م</span></div><div class="nx" id="nx">${isToday ? nextTxt() : ''}</div></div></div>
 <div class="card pr"><div class="pg">${prayers(d).map(x => `<div class="${x[0] === 'الشروق' ? 'sr' : ''}"><small>${x[0]}</small><b>${hm(x[1])}</b></div>`).join('')}</div><small class="pc">📍 ${place()[0]}</small></div>
 <div class="card hero"><div class="ring ${rcls(pct)}" style="--p:${pct}"><span>${pct}%</span></div>
  <div><b>إنجاز اليوم</b><div class="sm">${rate(pct)}</div><div class="sm">8:30 ص — مراجعة إنجاز أمس: <b>${yp}%</b></div></div></div>
 ${sites.length ? `<div class="card sites">${sites.join('<br>')}</div>` : ''}
+${actCard(cur)}
 ${ITEMS.map(it => {
     if (isNA(it.k, di)) return `<div class="card it na"><div class="ih"><span class="ic">${it.ic}</span><div><b>${it.t}</b><small>غير مطلوب اليوم</small></div></div></div>`;
     const v = (t.s || {})[it.k];
@@ -256,6 +291,8 @@ document.addEventListener('click', e => {
   if (t.dataset.cal) { cur = t.dataset.cal; render(); return; }
   if (t.hasAttribute('data-evadd')) { const ti = $('#evt').value.trim(); if (!ti) { toast('اكتب العنوان'); return; } (S.ev[cur] = S.ev[cur] || []).push({ id: Date.now() + '', t: ti, tm: $('#evm').value, rem: $('#evr').checked }); S.ev[cur].sort((a, b) => (a.tm || '99').localeCompare(b.tm || '99')); save(); render(); sched(); return; }
   if (t.dataset.evdel) { S.ev[cur] = (S.ev[cur] || []).filter(e => e.id !== t.dataset.evdel); save(); render(); sched(); return; }
+  if (t.dataset.ad !== undefined) { const a = dayActs(cur)[+t.dataset.ad]; if (a) { const k = actKey(cur, a); S.ad[k] = !S.ad[k]; save(); $('#actl').innerHTML = actListHTML(cur); } return; }
+  if (t.dataset.nfix) { nfix(); return; }
   if (t.dataset.go) { cur = t.dataset.go; tab = 'today'; $('#view').scrollTop = 0; render(); return; }
   if (t.dataset.sr !== undefined) { const i = t.dataset.sr; S.series[i] = Math.max(0, (S.series[i] || 0) + +t.dataset.d); save(); render(); return; }
   if (t.dataset.gym !== undefined) { const x = S.track[cur] = S.track[cur] || { s: {}, n: '' }, i = +t.dataset.gym, n = gymParts(PLAN[dIdx(parse(cur))]).parts.length; x.g = x.g || []; x.g = x.g.includes(i) ? x.g.filter(a => a !== i) : [...x.g, i]; x.s.gym = x.g.length === 0 ? undefined : x.g.length >= n ? 'تم' : 'جزئي'; save(); render(); return; }
@@ -269,7 +306,10 @@ document.addEventListener('click', e => {
     save(); render();
   }
 });
+document.addEventListener('change', e => { if (e.target.id === 'actd' || e.target.id === 'actf') sched(); });
 document.addEventListener('input', e => {
+  if (e.target.id === 'actd') { const v = e.target.value; if (v.trim()) S.acts[cur] = v; else delete S.acts[cur]; save(); $('#actl').innerHTML = actListHTML(cur); }
+  if (e.target.id === 'actf') { S.set.daily = e.target.value; save(); $('#actl').innerHTML = actListHTML(cur); }
   if (e.target.id === 'note') { const x = S.track[cur] = S.track[cur] || { s: {}, n: '' }; x.n = e.target.value; save(); }
   if (e.target.dataset.bn !== undefined) { const x = S.batches[e.target.dataset.bn] = S.batches[e.target.dataset.bn] || {}; x.name = e.target.value; save(); }
 });
@@ -293,56 +333,92 @@ function csv() {
   return '\ufeff' + [head, ...rows].map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
 }
 /* ---------- notifications ---------- */
-function buildList() {
-    const now = new Date(), N = S.set.n, list = []; let evn = 0;
-    const add = (id, at, title, body, ch) => { if (at > now) list.push({ id, title, body, channelId: ch, schedule: { at, allowWhileIdle: true } }); };
-    const atT = (d, hh, mm) => { const x = new Date(d); x.setHours(hh, mm, 0, 0); return x; };
-    for (let k = 0; k < 7; k++) {
-      const d = addDays(now, k), di = dIdx(d), base = (k + 1) * 1000, pr = prayers(d), pp = p => pr.find(x => x[0] === p)[1], hd = hij(d), key = iso(d);
-      if (N.pray) {
-        ['الفجر', 'الظهر', 'العصر', 'المغرب', 'العشاء'].forEach((n, i) => {
-          const t = pp(n); add(base + i, t, `🕌 حان وقت صلاة ${n}`, `${hm(t)} • ${hd}`, 'pray');
-          if (S.set.pre > 0) add(base + 10 + i, new Date(t.getTime() - S.set.pre * 6e4), `بعد ${S.set.pre} دقائق: صلاة ${n}`, hm(t), 'pray');
-        });
-        add(base + 5, pp('الشروق'), '🌅 الشروق', 'انتهى وقت الفجر — الضحى بعد 15 دقيقة', 'plan');
-      }
-      if (N.adhkar) { add(base + 20, new Date(pp('الفجر').getTime() + 30 * 6e4), '📿 أذكار الصباح', 'ابدأ يومك بالأذكار والورد', 'plan'); add(base + 21, new Date(pp('العصر').getTime() + 20 * 6e4), '📿 أذكار المساء', 'أذكار المساء + الصلاة على النبي ﷺ', 'plan'); }
-      if (N.tasks) {
-        const fri = di === 6, p = PLAN[di];
-        add(base + 30, atT(d, 6, 45), '🚶 مشي صباحي', '15 دقيقة قبل الخروج من البيت', 'plan');
-        add(base + 31, atT(d, 8, 30), '📊 مراجعة إنجاز أمس', `إنجاز أمس: ${dayPct(iso(addDays(d, -1)))}%`, 'plan');
-        if (!fri) {
-          add(base + 32, atT(d, 7, 0), '🏗 المهمة الفنية', [p.fnl, p.revit].filter(Boolean).join(' + ') + (p.s1 ? ' • زيارة: ' + p.s1 : ''), 'plan');
-          add(base + 33, atT(d, 12, 30), '💼 الشغل الخاص', p.s2 ? 'إشراف: ' + p.s2 : 'ابدأ الشغل الخاص', 'plan');
-          add(base + 34, atT(d, 13, 30), '📖 العلم الشرعي', `${p.sharia} + ${p.taf || ''}`, 'plan');
-          add(base + 35, atT(d, 15, 0), '✍️ المحتوى', p.content, 'plan');
-        }
-        add(base + 36, atT(d, 17, 30), '🏋️ الجيم / النشاط', p.gym, 'plan');
-        add(base + 37, atT(d, 20, 30), '📗 ورد القرآن والحفظ', '6 صفحات + وجه حفظ', 'plan');
-      }
-      if (N.log) add(base + 40, atT(d, 21, 30), '✅ سجّل إنجاز اليوم', 'افتح خطتي وحدّد تم / جزئي / لم يتم', 'plan');
-      if (N.ev) (S.ev[key] || []).forEach(e => { if (e.rem && e.tm) { const [h, m] = e.tm.split(':').map(Number); add(50000 + (++evn), atT(d, h, m), '📅 ' + e.t, hij(d), 'plan'); } });
+const NI = { perm: '', exact: '' };
+const DESK = () => (typeof window !== 'undefined' && window.khotatiDesk) || null;
+function buildList(back = 0) {
+  const now = new Date(), from = new Date(now.getTime() - back), N = S.set.n, pT = +S.set.preT || 0, list = []; let evn = 0;
+  const add = (id, at, title, body, ch) => { if (at > from) list.push({ id, title, body, channelId: ch, schedule: { at, allowWhileIdle: true } }); };
+  const addT = (id, at, title, body, ch = 'plan') => { add(id, at, title, body, ch); if (pT > 0) add(id + 200, new Date(at.getTime() - pT * 6e4), `⏰ بعد ${pT} د: ${title}`, body, ch); };
+  const atT = (d, hh, mm) => { const x = new Date(d); x.setHours(hh, mm, 0, 0); return x; };
+  for (let k = 0; k < 7; k++) {
+    const d = addDays(now, k), di = dIdx(d), base = (k + 1) * 1000, pr = prayers(d), pp = p => pr.find(x => x[0] === p)[1], hd = hij(d), key = iso(d);
+    if (N.pray) {
+      ['الفجر', 'الظهر', 'العصر', 'المغرب', 'العشاء'].forEach((n, i) => {
+        const t = pp(n); add(base + i, t, `🕌 حان وقت صلاة ${n}`, `${hm(t)} • ${hd}`, 'pray');
+        if (S.set.pre > 0) add(base + 10 + i, new Date(t.getTime() - S.set.pre * 6e4), `بعد ${S.set.pre} دقائق: صلاة ${n}`, hm(t), 'pray');
+      });
+      add(base + 5, pp('الشروق'), '🌅 الشروق', 'انتهى وقت الفجر — الضحى بعد 15 دقيقة', 'plan');
     }
-  return list;
+    if (N.adhkar) { add(base + 20, new Date(pp('الفجر').getTime() + 30 * 6e4), '📿 أذكار الصباح', 'ابدأ يومك بالأذكار والورد', 'plan'); add(base + 21, new Date(pp('العصر').getTime() + 20 * 6e4), '📿 أذكار المساء', 'أذكار المساء + الصلاة على النبي ﷺ', 'plan'); }
+    if (N.tasks) {
+      const fri = di === 6, p = PLAN[di];
+      addT(base + 30, atT(d, 6, 45), '🚶 مشي صباحي', '15 دقيقة قبل الخروج من البيت');
+      add(base + 31, atT(d, 8, 30), '📊 مراجعة إنجاز أمس', `إنجاز أمس: ${dayPct(iso(addDays(d, -1)))}%`, 'plan');
+      if (!fri) {
+        addT(base + 32, atT(d, 7, 0), '🏗 المهمة الفنية', [p.fnl, p.revit].filter(Boolean).join(' + ') + (p.s1 ? ' • زيارة: ' + p.s1 : ''));
+        addT(base + 33, atT(d, 12, 30), '💼 الشغل الخاص', p.s2 ? 'إشراف: ' + p.s2 : 'ابدأ الشغل الخاص');
+        addT(base + 34, atT(d, 13, 30), '📖 العلم الشرعي', `${p.sharia} + ${p.taf || ''}`);
+        addT(base + 35, atT(d, 15, 0), '✍️ المحتوى', p.content);
+      }
+      addT(base + 36, atT(d, 17, 30), '🏋️ الجيم / النشاط', p.gym);
+      addT(base + 37, atT(d, 20, 30), '📗 ورد القرآن', '6 صفحات من مصحف التهجد');
+      add(base + 38, new Date(pp('الشروق').getTime() + 20 * 6e4), '🕌 صلاة الضحى', '4 ركعات', 'plan');
+      addT(base + 41, atT(d, 21, 0), '🧠 الحفظ', 'وجه يوميًا');
+      addT(base + 42, atT(d, 22, 0), '🕌 النوافل والقيام', '4 قيام + 10 متفرقة (والرواتب 12)');
+    }
+    if (N.log) add(base + 40, atT(d, 21, 30), '✅ سجّل إنجاز اليوم', 'افتح خطتي وحدّد تم / جزئي / لم يتم', 'plan');
+    if (N.acts !== false) dayActs(key).forEach((a, i) => { if (a.min == null || i > 99) return; addT(base + 100 + i, atT(d, Math.floor(a.min / 60), a.min % 60), '📌 ' + a.title, a.src === 'f' ? 'نشاط يومي ثابت' : 'نشاط اليوم'); });
+    if (N.ev) (S.ev[key] || []).forEach(e => { if (e.rem && e.tm) { const [h, m] = e.tm.split(':').map(Number), at = atT(d, h, m); evn++; add(50000 + evn, at, '📅 ' + e.t, hij(d), 'plan'); if (pT > 0) add(70000 + evn, new Date(at.getTime() - pT * 6e4), `⏰ بعد ${pT} د: 📅 ${e.t}`, hij(d), 'plan'); } });
+  }
+  list.sort((a, b) => a.schedule.at - b.schedule.at);
+  return list.slice(0, 450);
 }
 const isElectron = /Electron/i.test(navigator.userAgent);
 let wl = [], wlT = 0; const fired = new Set();
 function webTick() {
   const now = Date.now(); if (now - wlT > 300000) { wl = buildList(); wlT = now; }
-  for (const n of wl) { const t = n.schedule.at.getTime(), k = n.id + '-' + t; if (t <= now && t > now - 120000 && !fired.has(k)) { fired.add(k); try { const x = new Notification(n.title, { body: n.body, silent: false }); x.onclick = () => window.focus(); } catch (e) { } } }
+  for (const n of wl) { const t = n.schedule.at.getTime(), k = n.id + '-' + t; if (t <= now && t > now - 120000 && !fired.has(k)) { fired.add(k); toast(n.title + ' — ' + n.body); try { const x = new Notification(n.title, { body: n.body, silent: false }); x.onclick = () => window.focus(); } catch (e) { } } }
 }
-async function sched(ask) {
-  if (!Capacitor.isNativePlatform()) { wlT = 0; if ('Notification' in window && Notification.permission === 'default' && ask) await Notification.requestPermission(); S.set.scheduled = buildList().length; save(); return; }
+async function sched0(ask) {
+  if (DESK()) {
+    try { const l = buildList(600000).map(n => ({ id: n.id, title: n.title, body: n.body, at: n.schedule.at.getTime() })); DESK().setList(l); NI.perm = 'granted'; S.set.scheduled = l.length; S.set.err = ''; } catch (e) { NI.perm = 'error'; S.set.err = String(e.message || e); }
+    save(); return;
+  }
+  if (!Capacitor.isNativePlatform()) {
+    wlT = 0; if (!('Notification' in window)) { NI.perm = 'unsupported'; return; }
+    if (Notification.permission === 'default' && ask) await Notification.requestPermission();
+    NI.perm = Notification.permission; S.set.scheduled = buildList().length; save(); return;
+  }
   try {
     let pm = await LocalNotifications.checkPermissions();
     if (pm.display !== 'granted' && ask) pm = await LocalNotifications.requestPermissions();
-    if (pm.display !== 'granted') return;
+    NI.perm = pm.display; if (pm.display !== 'granted') return;
     try { await LocalNotifications.createChannel({ id: 'pray', name: 'مواقيت الصلاة', importance: 5, vibration: true, visibility: 1 }); await LocalNotifications.createChannel({ id: 'plan', name: 'الخطة والمفكرة', importance: 4, vibration: true, visibility: 1 }); } catch (e) { }
     const pend = await LocalNotifications.getPending(); if (pend.notifications.length) await LocalNotifications.cancel({ notifications: pend.notifications.map(x => ({ id: x.id })) });
     const list = buildList();
     if (list.length) await LocalNotifications.schedule({ notifications: list });
-    S.set.scheduled = list.length; save();
+    S.set.scheduled = list.length; S.set.err = '';
+    try { NI.exact = (await LocalNotifications.checkExactNotificationSetting()).exact_alarm; } catch (e) { }
   } catch (e) { S.set.err = String(e.message || e); }
+  save();
+}
+let sq = Promise.resolve();
+const sched = ask => (sq = sq.then(() => sched0(ask)).catch(() => { }));
+async function nfix() {
+  await sched(true);
+  if (NI.perm !== 'granted') toast(Capacitor.isNativePlatform() ? 'الإذن مرفوض — افتح إعدادات الجوال ← التطبيقات ← خطتي ← الإشعارات وفعّلها' : 'فعّل الإشعارات من إعدادات المتصفح للموقع');
+  else toast('تم تفعيل التنبيهات ✔');
+  render();
+}
+async function testNotif() {
+  const title = '🔔 اختبار خطتي', body = 'لو وصلتك هذه الرسالة فالتنبيهات تعمل';
+  if (DESK()) { const ok = await DESK().test(title, body); toast(ok ? 'أُرسل تنبيه الآن — إن لم يظهر راجع «المساعد في التركيز» (Focus Assist) في ويندوز' : 'إشعارات ويندوز غير مدعومة على هذا الجهاز'); return; }
+  if (Capacitor.isNativePlatform()) {
+    await sched(true); if (NI.perm !== 'granted') return nfix();
+    try { await LocalNotifications.schedule({ notifications: [{ id: 99999, title, body, channelId: 'plan', schedule: { at: new Date(Date.now() + 5000), allowWhileIdle: true } }] }); toast('سيصلك تنبيه بعد 5 ثوانٍ — اقفل الشاشة وانتظر'); } catch (e) { toast('تعذر الجدولة: ' + (e.message || e)); }
+    return;
+  }
+  if ('Notification' in window) { if (Notification.permission === 'default') await Notification.requestPermission(); try { new Notification(title, { body }); toast('أُرسل تنبيه الآن'); } catch (e) { toast('المتصفح لا يسمح بالإشعارات'); } }
 }
 
 /* ---------- updates ---------- */
@@ -365,10 +441,13 @@ function openSheet() {
 <select id="city">${Object.entries(CITIES).map(([k, v]) => `<option value="${k}"${S.set.city === k ? ' selected' : ''}>${v[0]}</option>`).join('')}${S.set.lat != null ? `<option value="gps"${S.set.city === 'gps' ? ' selected' : ''}>موقعي الحالي (GPS)</option>` : ''}</select>
 <button class="big s" id="gps">📡 استخدم موقعي الحالي</button>
 <b>🔔 التنبيهات</b>
-${[['pray', 'مواقيت الصلاة'], ['adhkar', 'الأذكار'], ['tasks', 'مهام الخطة اليومية'], ['log', 'تذكير تسجيل الإنجاز'], ['ev', 'مواعيد المفكرة']].map(x => `<label class="tg"><input type="checkbox" data-n="${x[0]}"${N[x[0]] ? ' checked' : ''}> ${x[1]}</label>`).join('')}
+${[['pray', 'مواقيت الصلاة'], ['adhkar', 'الأذكار'], ['tasks', 'مهام الخطة اليومية'], ['log', 'تذكير تسجيل الإنجاز'], ['acts', 'أنشطتي اليومية'], ['ev', 'مواعيد المفكرة']].map(x => `<label class="tg"><input type="checkbox" data-n="${x[0]}"${(x[0] === 'acts' ? N.acts !== false : N[x[0]]) ? ' checked' : ''}> ${x[1]}</label>`).join('')}
 <label class="tg">تنبيه قبل الأذان: <select id="pre"><option value="0">بدون</option><option value="5">5 د</option><option value="10">10 د</option><option value="15">15 د</option><option value="20">20 د</option></select></label>
+<label class="tg">تنبيه قبل كل مهمة ونشاط: <select id="preT"><option value="0">بدون</option><option value="5">5 د</option><option value="10">10 د</option><option value="15">15 د</option><option value="30">30 د</option></select></label>
 <button class="big" id="nt">🔔 تفعيل / تحديث التنبيهات الآن</button>
-<div class="sm">${S.set.scheduled != null ? 'مجدولة: ' + S.set.scheduled + ' تنبيه (7 أيام) — تتجدد تلقائيًا كل مرة تفتح فيها التطبيق' : 'اضغط الزر لمنح الإذن'}${S.set.err ? '<br>' + esc(S.set.err) : ''}</div>
+<button class="big s" id="tn">🧪 اختبار تنبيه الآن</button>
+<div class="sm">${NI.perm === 'granted' ? '✅ الإذن مفعّل' : '❌ الإذن غير مفعّل (' + esc(NI.perm || '—') + ')'}${Capacitor.isNativePlatform() ? ' • المنبّه الدقيق: ' + (NI.exact === 'granted' ? '✅' : NI.exact ? '❌ ' + esc(NI.exact) : '—') : ''}<br>${S.set.scheduled != null ? 'مجدولة: ' + S.set.scheduled + ' تنبيه — تتجدد تلقائيًا كل مرة تفتح فيها التطبيق' : 'اضغط الزر لمنح الإذن'}${S.set.err ? '<br>⚠️ ' + esc(S.set.err) : ''}</div>
+${Capacitor.isNativePlatform() ? '<div class="sm">لو التنبيهات تتأخر أو تختفي على سامسونج: الإعدادات ← البطارية ← حدود الاستخدام في الخلفية، وأوقف «وضع السكون للتطبيقات غير المستخدمة» أو أضف «خطتي» إلى «التطبيقات التي لا تنام أبدًا» (قد يختلف المسار قليلًا حسب إصدار One UI).</div>' : DESK() ? '<div class="sm">التنبيهات تعمل طالما البرنامج مفتوح أو في صينية النظام (بجوار الساعة). اضغط خروج من أيقونة الصينية يوقفها. ثبّته بملف Khotati-Setup وليس النسخة المحمولة.</div>' : ''}
 <b>🔄 التحديث</b>
 <button class="big s" id="up">⬇️ البحث عن نسخة جديدة (يحتاج إنترنت)</button>
 <button class="big s" id="ip">📋 استيراد ملف الخطة المحدّثة (plan.json)</button>
@@ -380,10 +459,12 @@ ${[['pray', 'مواقيت الصلاة'], ['adhkar', 'الأذكار'], ['tasks'
 <button class="big s" id="im">📥 استرجاع نسخة احتياطية</button>
 <button class="big danger" id="rs">🗑 مسح كل البيانات</button>
 <button class="big s" id="cl">إغلاق</button><input type="file" id="fi" accept=".json,application/json" hidden><input type="file" id="fp" accept=".json,application/json" hidden></div>`;
-  $('#pre').value = String(S.set.pre);
+  $('#pre').value = String(S.set.pre); $('#preT').value = String(S.set.preT || 0);
   $('#cl').onclick = () => s.hidden = true;
   $('#city').onchange = e => { S.set.city = e.target.value; save(); render(); sched(); };
   $('#pre').onchange = e => { S.set.pre = +e.target.value; save(); sched(); };
+  $('#preT').onchange = e => { S.set.preT = +e.target.value; save(); sched(); };
+  $('#tn').onclick = testNotif;
   s.querySelectorAll('[data-n]').forEach(c => c.onchange = () => { S.set.n[c.dataset.n] = c.checked; save(); sched(); });
   $('#nt').onclick = async () => { await sched(true); if (Capacitor.isNativePlatform()) { try { const x = await LocalNotifications.checkExactNotificationSetting(); if (x.exact_alarm !== 'granted') { toast('فعّل «المنبهات والتذكيرات» للتطبيق ليصل التنبيه في وقته بالضبط'); await LocalNotifications.changeExactNotificationSetting(); } } catch (e) { } } openSheet(); };
   $('#gps').onclick = () => { navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => { S.set.lat = p.coords.latitude; S.set.lng = p.coords.longitude; S.set.city = 'gps'; save(); render(); sched(); openSheet(); toast('تم تحديد موقعك'); }, () => toast('تعذر تحديد الموقع — فعّل الموقع وصلاحيته'), { timeout: 15000 }) : toast('الموقع غير متاح'); };
@@ -394,9 +475,11 @@ ${[['pray', 'مواقيت الصلاة'], ['adhkar', 'الأذكار'], ['tasks'
   $('#ex1').onclick = () => out('khotati-backup-' + stamp() + '.json', JSON.stringify(S), 'application/json');
   $('#ex2').onclick = () => out('khotati-daily-' + stamp() + '.csv', csv(), 'text/csv');
   $('#im').onclick = () => $('#fi').click();
-  $('#fi').onchange = async e => { try { const j = JSON.parse(await e.target.files[0].text()); for (const k of ['track', 'books', 'series', 'weeks', 'batches', 'ev']) S[k] = j[k] || {}; if (j.set) S.set = j.set; if (j.custom) S.custom = j.custom; save(); s.hidden = true; toast('تم الاسترجاع'); setTimeout(() => location.reload(), 600); } catch (x) { toast('الملف غير صالح'); } };
+  $('#fi').onchange = async e => { try { const j = JSON.parse(await e.target.files[0].text()); for (const k of ['track', 'books', 'series', 'weeks', 'batches', 'ev', 'acts', 'ad']) S[k] = j[k] || {}; if (j.set) S.set = j.set; if (j.custom) S.custom = j.custom; save(); s.hidden = true; toast('تم الاسترجاع'); setTimeout(() => location.reload(), 600); } catch (x) { toast('الملف غير صالح'); } };
   $('#rs').onclick = () => { if (confirm('مسح كل البيانات؟ لا يمكن التراجع.')) { localStorage.removeItem(KEY); location.reload(); } };
 }
-render(); sched(); if (!Capacitor.isNativePlatform()) { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); setInterval(webTick, 15000); webTick(); }
+render(); sched(true).then(render);
+if (DESK()) { try { DESK().onFired(m => toast(m)); } catch (e) { } setInterval(() => sched(), 300000); }
+else if (!Capacitor.isNativePlatform()) { setInterval(webTick, 15000); webTick(); }
 setInterval(() => { const n = $('#nx'); if (n && tab === 'today' && cur === iso(new Date())) n.innerHTML = nextTxt(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); sched(); } });
