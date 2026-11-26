@@ -5,6 +5,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { Browser } from '@capacitor/browser';
 import DATA0 from './data.json';
 import { CITIES, times as ptimes } from './prayer.js';
+import { parseWorkbook } from './xl.js';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -35,7 +36,8 @@ const KEY = 'khotati_v1';
 let S; try { S = JSON.parse(localStorage.getItem(KEY)); } catch (e) { }
 S = S || {};
 for (const k of ['track', 'books', 'series', 'weeks', 'batches']) S[k] = S[k] || {};
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } };
+const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } };
+function save() { if (S.sync) stamp0(); persist(); syncSoon(); }
 
 for (const k of ['ev', 'acts', 'ad']) S[k] = S[k] || {};
 S.set = Object.assign({ city: 'riyadh', pre: 10, preT: 10, daily: '', n: { pray: true, tasks: true, adhkar: true, ev: true, log: true } }, S.set || {});
@@ -263,13 +265,38 @@ ${(() => { const M = monthStats(cm.y, cm.m); if (!M.cnt) return '<div class="car
 <div class="grid3"><div class="card sc g"><b>${M.hi}</b><small>أيام ≥ 80%</small></div><div class="card sc y"><b>${M.mid}</b><small>أيام 50–79%</small></div><div class="card sc r"><b>${M.lo}</b><small>أيام &lt; 50%</small></div></div>
 <div class="card"><b>إنجاز كل يوم</b><div class="mc">${M.days.map(x => `<button data-go="${x.k}" title="${x.n}"><i class="${rcls(x.p)}" style="height:${Math.max(3, x.p)}%"></i><small>${x.n}</small></button>`).join('')}</div>
 <div class="sm">${M.best && M.best.p > 0 ? `أفضل يوم: ${M.best.n} (${M.best.p}%)` : ''}${M.worst ? ` • أضعف يوم مسجّل: ${M.worst.n} (${M.worst.p}%)` : ''}</div></div>
-${M.cats.map(c => `<div class="card row cat"><span>${c.ic} ${c.t}</span><div class="bar"><i class="${rcls(c.p)}" style="width:${c.p}%"></i></div><b>${c.p}%</b><em class="${rcls(c.p)}">${rate(c.p)}</em></div>`).join('')}`; })()}
+${M.cats.map(c => `<div class="card row cat"><span>${c.ic} ${c.t}</span><div class="bar"><i class="${rcls(c.p)}" style="width:${c.p}%"></i></div><b>${c.p}%</b><em class="${rcls(c.p)}">${rate(c.p)}</em></div>`).join('')}
+<button class="big" data-rep="1">📄 تقرير الشهر (ملف مستقل)</button>`; })()}
 <div class="card"><b>${fmtL(d)}</b><small>${hij(d)}</small>
 <div class="pg mini">${prayers(d).map(x => `<div><small>${x[0]}</small><b>${hm(x[1])}</b></div>`).join('')}</div>
 <button class="big s" data-go="${cur}">فتح خطة هذا اليوم (${dayPct(cur)}%)</button></div>
 <h3>مواعيد وملاحظات هذا اليوم</h3>
 ${evs.length ? evs.map(e => `<div class="card ev"><div><b>${esc(e.t)}</b><small>${e.tm ? '⏰ ' + e.tm : 'بدون وقت'}${e.rem && e.tm ? ' • مع تنبيه' : ''}</small></div><button data-evdel="${e.id}">🗑</button></div>`).join('') : '<div class="card sm">لا يوجد شيء — أضف موعدًا من الأسفل.</div>'}
 <div class="card"><b>إضافة موعد / ملاحظة</b><input id="evt" class="bn" placeholder="العنوان (مثال: اجتماع، موعد دكتور، سداد فاتورة)"><div class="fr"><input id="evm" type="time" class="bn"><label><input type="checkbox" id="evr" checked> تنبيه</label></div><button class="big" data-evadd>➕ إضافة</button></div>`;
+}
+
+
+function reportHTML(y, m) {
+  const M = monthStats(y, m), first = new Date(y, m, 1), mn = first.toLocaleDateString(LOC, { month: 'long', year: 'numeric' });
+  let hmn = ''; try { hmn = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', { month: 'long', year: 'numeric' }).format(new Date(y, m, 15)); } catch (e) { }
+  const sym = (k, di, v) => isNA(k, di) ? '—' : v === 'تم' ? '✔' : v === 'جزئي' ? '◐' : v ? '✘' : '·';
+  let acT = 0, acD = 0;
+  const rows = M.days.map(x => {
+    const t = S.track[x.k] || { s: {}, n: '' }, ac = dayActs(x.k), dn = ac.filter(a => S.ad[actKey(x.k, a)]).length; acT += ac.length; acD += dn;
+    return `<tr><td>${x.n}</td><td>${DAYS[x.i]}</td>${ITEMS.map(it => `<td>${sym(it.k, x.i, (t.s || {})[it.k])}</td>`).join('')}<td>${ac.length ? dn + '/' + ac.length : '—'}</td><td class="${rcls(x.p)}"><b>${x.p}%</b></td><td class="n">${esc(t.n || '')}</td></tr>`;
+  }).join('');
+  const css = `*{box-sizing:border-box}body{font-family:Tahoma,Segoe UI,Arial,sans-serif;margin:0;padding:24px;color:#14213d;background:#fff;line-height:1.7}h1{margin:0;font-size:24px}h2{font-size:17px;margin:22px 0 8px;border-bottom:2px solid #17877c;padding-bottom:4px}.sub{color:#5b6b85;font-size:13px}
+.k{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.k div{flex:1;min-width:120px;border:1px solid #d5dcea;border-radius:12px;padding:10px;text-align:center}.k b{display:block;font-size:24px}.g{color:#15803d}.y{color:#b45309}.r{color:#b91c1c}
+.cat{display:flex;align-items:center;gap:10px;margin:6px 0}.cat span{width:150px}.bar{flex:1;height:12px;background:#e8edf6;border-radius:8px;overflow:hidden}.bar i{display:block;height:100%;background:#17877c}.bar i.y{background:#d97706}.bar i.r{background:#dc2626}.cat b{width:48px}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #d5dcea;padding:4px 5px;text-align:center}th{background:#eef2fa;font-size:11px}td.n{text-align:right;max-width:200px}.np{background:#17877c;color:#fff;border:0;border-radius:10px;padding:10px 18px;font:inherit;cursor:pointer;margin-top:14px}@media print{.np{display:none}body{padding:8px}}`;
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تقرير الإنجاز الشهري — ${mn}</title><style>${css}</style></head><body>
+<h1>📈 تقرير الإنجاز الشهري — ${mn}</h1><div class="sub">${hmn} • أُعدّ من تطبيق خطتي بتاريخ ${fmtL(new Date())}</div>
+<div class="k"><div><b class="${rcls(M.avg)}">${M.avg}%</b>متوسط الإنجاز (${rate(M.avg)})</div><div><b>${M.tracked}/${M.cnt}</b>أيام مسجّلة</div><div><b class="g">${M.hi}</b>أيام ≥ 80%</div><div><b class="y">${M.mid}</b>أيام 50–79%</div><div><b class="r">${M.lo}</b>أيام &lt; 50%</div>${acT ? `<div><b>${acD}/${acT}</b>أنشطة منجزة</div>` : ''}</div>
+<div class="sub">${M.best && M.best.p > 0 ? `أفضل يوم: ${M.best.n} (${M.best.p}%)` : ''}${M.worst ? ` • أضعف يوم مسجّل: ${M.worst.n} (${M.worst.p}%)` : ''}</div>
+<h2>الإنجاز حسب الفئة</h2>${M.cats.map(c => `<div class="cat"><span>${c.ic} ${c.t}</span><div class="bar"><i class="${rcls(c.p)}" style="width:${c.p}%"></i></div><b>${c.p}%</b><em>${rate(c.p)}</em></div>`).join('')}
+<h2>تفصيل الأيام</h2><table><thead><tr><th>اليوم</th><th></th>${ITEMS.map(it => `<th>${it.ic}<br>${it.t}</th>`).join('')}<th>الأنشطة</th><th>النسبة</th><th>ملاحظات</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="sub" style="margin-top:8px">✔ تم • ◐ جزئي • ✘ لم يتم • · غير مسجّل • — غير مطلوب</div>
+<button class="np" onclick="window.print()">🖨 طباعة / حفظ PDF</button></body></html>`;
 }
 
 function render() {
@@ -293,6 +320,7 @@ document.addEventListener('click', e => {
   if (t.dataset.evdel) { S.ev[cur] = (S.ev[cur] || []).filter(e => e.id !== t.dataset.evdel); save(); render(); sched(); return; }
   if (t.dataset.ad !== undefined) { const a = dayActs(cur)[+t.dataset.ad]; if (a) { const k = actKey(cur, a); S.ad[k] = !S.ad[k]; save(); $('#actl').innerHTML = actListHTML(cur); } return; }
   if (t.dataset.nfix) { nfix(); return; }
+  if (t.dataset.rep) { if (!monthStats(cm.y, cm.m).cnt) { toast('لا توجد أيام في هذا الشهر بعد'); return; } out('khotati-report-' + cm.y + '-' + String(cm.m + 1).padStart(2, '0') + '.html', reportHTML(cm.y, cm.m), 'text/html'); return; }
   if (t.dataset.go) { cur = t.dataset.go; tab = 'today'; $('#view').scrollTop = 0; render(); return; }
   if (t.dataset.sr !== undefined) { const i = t.dataset.sr; S.series[i] = Math.max(0, (S.series[i] || 0) + +t.dataset.d); save(); render(); return; }
   if (t.dataset.gym !== undefined) { const x = S.track[cur] = S.track[cur] || { s: {}, n: '' }, i = +t.dataset.gym, n = gymParts(PLAN[dIdx(parse(cur))]).parts.length; x.g = x.g || []; x.g = x.g.includes(i) ? x.g.filter(a => a !== i) : [...x.g, i]; x.s.gym = x.g.length === 0 ? undefined : x.g.length >= n ? 'تم' : 'جزئي'; save(); render(); return; }
@@ -421,6 +449,97 @@ async function testNotif() {
   if ('Notification' in window) { if (Notification.permission === 'default') await Notification.requestPermission(); try { new Notification(title, { body }); toast('أُرسل تنبيه الآن'); } catch (e) { toast('المتصفح لا يسمح بالإشعارات'); } }
 }
 
+/* ---------- sync between devices (encrypted secret Gist) ---------- */
+const SYNC_SEC = ['track', 'books', 'series', 'weeks', 'batches', 'ev', 'acts', 'ad'], SYNC_SET = ['city', 'lat', 'lng', 'pre', 'preT', 'n', 'daily'];
+const hs = x => { let h = 5381; for (let i = 0; i < x.length; i++) h = ((h << 5) + h + x.charCodeAt(i)) | 0; return h + ':' + x.length; };
+function flat() {
+  const m = {};
+  for (const sec of SYNC_SEC) for (const k of Object.keys(S[sec] || {})) if (S[sec][k] !== undefined) m[sec + '|' + k] = JSON.stringify(S[sec][k]);
+  for (const k of SYNC_SET) if (S.set[k] !== undefined) m['set|' + k] = JSON.stringify(S.set[k]);
+  if (S.custom) m['custom|'] = JSON.stringify(S.custom);
+  return m;
+}
+function stamp0(t0) {
+  const f = flat(), now = t0 == null ? Date.now() : t0; S.mt = S.mt || {}; S.sh = S.sh || {};
+  for (const k in f) { const h = hs(f[k]); if (S.sh[k] !== h) { S.sh[k] = h; S.mt[k] = now; } }
+  for (const k in S.sh) if (!(k in f) && S.sh[k] !== 0) { S.sh[k] = 0; S.mt[k] = now; }
+}
+function applyKey(key, v) {
+  const i = key.indexOf('|'), sec = key.slice(0, i), k = key.slice(i + 1);
+  if (sec === 'set') { if (v === null) delete S.set[k]; else S.set[k] = JSON.parse(v); }
+  else if (sec === 'custom') { if (v === null) delete S.custom; else S.custom = JSON.parse(v); }
+  else if (SYNC_SEC.includes(sec)) { S[sec] = S[sec] || {}; if (v === null) delete S[sec][k]; else S[sec][k] = JSON.parse(v); }
+}
+function mergeRemote(items, ties) {
+  const f = flat(); let changed = false, reload = false;
+  for (const key in items) {
+    const r = items[key], t = S.mt[key] || 0;
+    if (r.t > t || (ties && r.t === t && (r.v !== (f[key] ?? null)))) {
+      applyKey(key, r.v); S.mt[key] = r.t; S.sh[key] = r.v === null ? 0 : hs(r.v); changed = true; if (key.startsWith('custom|')) reload = true;
+    }
+  }
+  return { changed, reload };
+}
+const b64 = u => { let s = ''; for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(s); };
+const unb64 = x => Uint8Array.from(atob(x), c => c.charCodeAt(0));
+let ck = null;
+async function ckey(tok) {
+  if (ck && ck.t === tok) return ck.k;
+  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(tok), 'PBKDF2', false, ['deriveKey']);
+  const k = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: new TextEncoder().encode('khotati-sync-v1'), iterations: 100000, hash: 'SHA-256' }, km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  ck = { t: tok, k }; return k;
+}
+async function enc(obj, tok) {
+  const txt = JSON.stringify(obj); if (!(window.crypto && crypto.subtle)) return JSON.stringify({ v: 0, d: txt });
+  const iv = crypto.getRandomValues(new Uint8Array(12)), ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await ckey(tok), new TextEncoder().encode(txt)));
+  return JSON.stringify({ v: 1, iv: b64(iv), ct: b64(ct) });
+}
+async function dec(txt, tok) {
+  const j = JSON.parse(txt); if (j.v === 0) return JSON.parse(j.d);
+  try { return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(j.iv) }, await ckey(tok), unb64(j.ct)))); } catch (e) { throw new Error('المفتاح مختلف عن المفتاح المستخدم في الجهاز الأول — استخدم نفس المفتاح'); }
+}
+const GH = 'https://api.github.com', FN = 'khotati.json';
+async function gh(path, tok, opt = {}) {
+  const r = await fetch(GH + path, { ...opt, headers: { Authorization: 'Bearer ' + tok, Accept: 'application/vnd.github+json', ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
+  if (!r.ok) throw new Error(r.status === 401 ? 'المفتاح غير صالح أو منتهي' : r.status === 403 || r.status === 404 ? 'المفتاح لا يملك صلاحية gist (أنشئ مفتاحًا جديدًا بصلاحية gist)' : 'خطأ GitHub ' + r.status);
+  return r.json();
+}
+const SY = { busy: false, again: false, err: '', last: 0 };
+async function syncNow(first) {
+  const sy = S.sync; if (!sy || !sy.token) return;
+  if (SY.busy) { SY.again = true; return; }
+  SY.busy = true; SY.err = '';
+  try {
+    if (!sy.gid) { const L = await gh('/gists?per_page=100', sy.token); const g = L.find(x => x.description === 'khotati-sync' && x.files && x.files[FN]); if (g) sy.gid = g.id; }
+    let remote = null;
+    if (sy.gid) {
+      const g = await gh('/gists/' + sy.gid, sy.token); let f = g.files[FN];
+      if (f && f.truncated) f.content = await (await fetch(f.raw_url, { headers: { Authorization: 'Bearer ' + sy.token } })).text();
+      if (f && f.content) remote = await dec(f.content, sy.token);
+    }
+    if (!S.mt) stamp0(1); else stamp0();
+    let rep = { changed: false, reload: false };
+    if (remote && remote.items) rep = mergeRemote(remote.items, !!first);
+    const f = flat(), items = {}; let need = !sy.gid;
+    for (const k of new Set([...Object.keys(S.mt), ...Object.keys((remote && remote.items) || {})])) {
+      const t = S.mt[k] || 0, r = remote && remote.items && remote.items[k];
+      if (r && r.t >= t) { items[k] = r; continue; }
+      items[k] = { t, v: f[k] ?? null }; need = true;
+    }
+    if (need) {
+      const content = await enc({ v: 1, items }, sy.token);
+      if (!sy.gid) { const g = await gh('/gists', sy.token, { method: 'POST', body: JSON.stringify({ description: 'khotati-sync', public: false, files: { [FN]: { content } } }) }); sy.gid = g.id; }
+      else await gh('/gists/' + sy.gid, sy.token, { method: 'PATCH', body: JSON.stringify({ files: { [FN]: { content } } }) });
+    }
+    SY.last = Date.now(); persist();
+    if (rep.reload) { toast('وصلت خطة جديدة من الجهاز الآخر — جارٍ التحديث'); setTimeout(() => location.reload(), 900); }
+    else if (rep.changed) { render(); sched(); }
+  } catch (e) { SY.err = String(e.message || e); }
+  SY.busy = false;
+  if (SY.again) { SY.again = false; setTimeout(() => syncNow(), 1500); }
+}
+function syncSoon() { if (!S.sync || !S.sync.token) return; clearTimeout(syncSoon.t); syncSoon.t = setTimeout(() => syncNow(), 4000); }
+
 /* ---------- updates ---------- */
 let VER = 0; fetch('version.json').then(r => r.json()).then(j => { VER = j.v || 0; }).catch(() => { });
 async function checkUpdate() {
@@ -448,6 +567,11 @@ ${[['pray', 'مواقيت الصلاة'], ['adhkar', 'الأذكار'], ['tasks'
 <button class="big s" id="tn">🧪 اختبار تنبيه الآن</button>
 <div class="sm">${NI.perm === 'granted' ? '✅ الإذن مفعّل' : '❌ الإذن غير مفعّل (' + esc(NI.perm || '—') + ')'}${Capacitor.isNativePlatform() ? ' • المنبّه الدقيق: ' + (NI.exact === 'granted' ? '✅' : NI.exact ? '❌ ' + esc(NI.exact) : '—') : ''}<br>${S.set.scheduled != null ? 'مجدولة: ' + S.set.scheduled + ' تنبيه — تتجدد تلقائيًا كل مرة تفتح فيها التطبيق' : 'اضغط الزر لمنح الإذن'}${S.set.err ? '<br>⚠️ ' + esc(S.set.err) : ''}</div>
 ${Capacitor.isNativePlatform() ? '<div class="sm">لو التنبيهات تتأخر أو تختفي على سامسونج: الإعدادات ← البطارية ← حدود الاستخدام في الخلفية، وأوقف «وضع السكون للتطبيقات غير المستخدمة» أو أضف «خطتي» إلى «التطبيقات التي لا تنام أبدًا» (قد يختلف المسار قليلًا حسب إصدار One UI).</div>' : DESK() ? '<div class="sm">التنبيهات تعمل طالما البرنامج مفتوح أو في صينية النظام (بجوار الساعة). اضغط خروج من أيقونة الصينية يوقفها. ثبّته بملف Khotati-Setup وليس النسخة المحمولة.</div>' : ''}
+<b>📊 ملف الإكسل</b>
+<button class="big" id="xl">📊 إضافة / تحديث ملف الإكسل (xlsx)</button>
+<div class="sm">${S.xl ? 'آخر ملف: ' + esc(S.xl.name) + ' — ' + esc(new Date(S.xl.at).toLocaleDateString(LOC)) + '<br>' : ''}اختر ملف الخطة المحدّث في أي وقت: يتحدّث الجدول الأسبوعي والكتب والمحتوى والجدول الزمني تلقائيًا، وبياناتك ومتابعتك لا تُمسح.</div>
+<b>🔗 الربط بين الجوال والكمبيوتر</b>
+${S.sync ? `<div class="sm">✅ مربوط — أي تغيير يظهر على الجهاز الآخر تلقائيًا${SY.last ? ' • آخر مزامنة ' + hm(new Date(SY.last)) : ''}${SY.err ? '<br>⚠️ ' + esc(SY.err) : ''}</div><button class="big s" id="sy">🔄 مزامنة الآن</button><button class="big s" id="su">فك الربط عن هذا الجهاز</button>` : `<div class="sm">خطوة واحدة على كل جهاز: ١) اضغط الزر الأول لإنشاء مفتاح (اختر «No expiration» وتأكد أن «gist» فقط مفعّل) ٢) انسخ المفتاح والصقه هنا ٣) اضغط ربط. استخدم <b>نفس المفتاح</b> على الجهازين. البيانات مشفّرة قبل رفعها.</div><button class="big s" id="sk">🔑 صفحة إنشاء المفتاح</button><input id="st" class="bn" placeholder="الصق المفتاح هنا (ghp_…)" autocomplete="off" spellcheck="false"><button class="big" id="sl">🔗 ربط هذا الجهاز</button>`}
 <b>🔄 التحديث</b>
 <button class="big s" id="up">⬇️ البحث عن نسخة جديدة (يحتاج إنترنت)</button>
 <button class="big s" id="ip">📋 استيراد ملف الخطة المحدّثة (plan.json)</button>
@@ -458,7 +582,7 @@ ${Capacitor.isNativePlatform() ? '<div class="sm">لو التنبيهات تتأ
 <button class="big" id="ex2">📊 تصدير المتابعة اليومية (Excel / CSV)</button>
 <button class="big s" id="im">📥 استرجاع نسخة احتياطية</button>
 <button class="big danger" id="rs">🗑 مسح كل البيانات</button>
-<button class="big s" id="cl">إغلاق</button><input type="file" id="fi" accept=".json,application/json" hidden><input type="file" id="fp" accept=".json,application/json" hidden></div>`;
+<button class="big s" id="cl">إغلاق</button><input type="file" id="fx" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden><input type="file" id="fi" accept=".json,application/json" hidden><input type="file" id="fp" accept=".json,application/json" hidden></div>`;
   $('#pre').value = String(S.set.pre); $('#preT').value = String(S.set.preT || 0);
   $('#cl').onclick = () => s.hidden = true;
   $('#city').onchange = e => { S.set.city = e.target.value; save(); render(); sched(); };
@@ -469,10 +593,16 @@ ${Capacitor.isNativePlatform() ? '<div class="sm">لو التنبيهات تتأ
   $('#nt').onclick = async () => { await sched(true); if (Capacitor.isNativePlatform()) { try { const x = await LocalNotifications.checkExactNotificationSetting(); if (x.exact_alarm !== 'granted') { toast('فعّل «المنبهات والتذكيرات» للتطبيق ليصل التنبيه في وقته بالضبط'); await LocalNotifications.changeExactNotificationSetting(); } } catch (e) { } } openSheet(); };
   $('#gps').onclick = () => { navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => { S.set.lat = p.coords.latitude; S.set.lng = p.coords.longitude; S.set.city = 'gps'; save(); render(); sched(); openSheet(); toast('تم تحديد موقعك'); }, () => toast('تعذر تحديد الموقع — فعّل الموقع وصلاحيته'), { timeout: 15000 }) : toast('الموقع غير متاح'); };
   $('#up').onclick = checkUpdate;
+  $('#xl').onclick = () => $('#fx').click();
+  $('#fx').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const { data, found } = parseWorkbook(new Uint8Array(await f.arrayBuffer()), D); S.custom = data; S.xl = { name: f.name, at: Date.now() }; save(); toast('تم تحديث الخطة من: ' + found.join('، ')); setTimeout(() => location.reload(), 1000); } catch (x) { toast('تعذر قراءة الملف: ' + (x.message || x)); } };
+  const openUrl = u => Capacitor.isNativePlatform() ? Browser.open({ url: u }) : window.open(u, '_blank');
+  if ($('#sk')) { $('#sk').onclick = () => openUrl('https://github.com/settings/tokens/new?scopes=gist&description=khotati-sync');
+    $('#sl').onclick = async () => { const tk = $('#st').value.trim(); if (!tk) { toast('الصق المفتاح أولًا'); return; } S.sync = { token: tk }; persist(); toast('جارٍ الربط…'); await syncNow(true); if (SY.err) { const er = SY.err; delete S.sync; persist(); toast(er); } else toast('تم الربط ✔'); openSheet(); }; }
+  if ($('#sy')) { $('#sy').onclick = async () => { toast('جارٍ المزامنة…'); await syncNow(); toast(SY.err || 'تمت المزامنة ✔'); openSheet(); }; $('#su').onclick = () => { if (confirm('فك الربط عن هذا الجهاز؟ بياناتك تبقى عليه.')) { delete S.sync; delete S.mt; delete S.sh; persist(); openSheet(); } }; }
   $('#ep').onclick = () => out('khotati-plan-' + stamp() + '.json', JSON.stringify(D), 'application/json');
   $('#ip').onclick = () => $('#fp').click();
   $('#fp').onchange = async e => { try { const j = JSON.parse(await e.target.files[0].text()); if (!j.books || !j.weeks || !j.plan) throw 0; S.custom = j; save(); toast('تم تحديث الخطة'); setTimeout(() => location.reload(), 800); } catch (x) { toast('ملف الخطة غير صالح'); } };
-  $('#ex1').onclick = () => out('khotati-backup-' + stamp() + '.json', JSON.stringify(S), 'application/json');
+  $('#ex1').onclick = () => out('khotati-backup-' + stamp() + '.json', JSON.stringify(S, (k, v) => (k === 'sync' || k === 'mt' || k === 'sh') ? undefined : v), 'application/json');
   $('#ex2').onclick = () => out('khotati-daily-' + stamp() + '.csv', csv(), 'text/csv');
   $('#im').onclick = () => $('#fi').click();
   $('#fi').onchange = async e => { try { const j = JSON.parse(await e.target.files[0].text()); for (const k of ['track', 'books', 'series', 'weeks', 'batches', 'ev', 'acts', 'ad']) S[k] = j[k] || {}; if (j.set) S.set = j.set; if (j.custom) S.custom = j.custom; save(); s.hidden = true; toast('تم الاسترجاع'); setTimeout(() => location.reload(), 600); } catch (x) { toast('الملف غير صالح'); } };
@@ -482,4 +612,5 @@ render(); sched(true).then(render);
 if (DESK()) { try { DESK().onFired(m => toast(m)); } catch (e) { } setInterval(() => sched(), 300000); }
 else if (!Capacitor.isNativePlatform()) { setInterval(webTick, 15000); webTick(); }
 setInterval(() => { const n = $('#nx'); if (n && tab === 'today' && cur === iso(new Date())) n.innerHTML = nextTxt(); }, 30000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); sched(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); sched(); syncNow(); } });
+syncNow(); setInterval(() => syncNow(), 60000);
