@@ -16,6 +16,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "alarm-preload.js",
       "app/**/*"
     ],
     "icon": "icon.png",

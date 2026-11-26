@@ -36,9 +36,24 @@ jobs:
               <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
           '''
+          perms+='''    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+              <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>
+              <uses-permission android:name="android.permission.VIBRATE"/>
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+          '''
+          comps='''<receiver android:name=".AlarmReceiver" android:exported="false"/>
+              <receiver android:name=".BootReceiver" android:exported="true"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter></receiver>
+              <service android:name=".AlarmService" android:exported="false" android:foregroundServiceType="mediaPlayback"/>
+              <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true" android:launchMode="singleTop" android:excludeFromRecents="true" android:theme="@android:style/Theme.Material.NoActionBar"/>
+          '''
           s=s.replace('<application',perms+'<application',1)
+          s=s.replace('</application>',comps+'</application>',1)
           open(p,'w').write(s)
           PY
+          mkdir -p android/app/src/main/java/com/mohamed/khotatiplan
+          cp android-extra/*.java android/app/src/main/java/com/mohamed/khotatiplan/
           echo '{"v":${{ github.run_number }}}' > www/version.json
           pip install pillow
           python3 make_icons.py

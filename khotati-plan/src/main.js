@@ -1,4 +1,4 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { LocalNotifications } from '@capacitor/local-notifications';
@@ -364,18 +364,19 @@ function csv() {
 }
 /* ---------- notifications ---------- */
 const NI = { perm: '', exact: '' };
+const KhAlarm = registerPlugin('KhAlarm');
 const DESK = () => (typeof window !== 'undefined' && window.khotatiDesk) || null;
 function buildList(back = 0) {
   const now = new Date(), from = new Date(now.getTime() - back), N = S.set.n, pT = +S.set.preT || 0, list = []; let evn = 0;
-  const add = (id, at, title, body, ch) => { if (at > from) list.push({ id, title, body, channelId: ch, schedule: { at, allowWhileIdle: true } }); };
-  const addT = (id, at, title, body, ch = 'plan') => { add(id, at, title, body, ch); if (pT > 0) add(id + 200, new Date(at.getTime() - pT * 6e4), `⏰ بعد ${pT} د: ${title}`, body, ch); };
+  const add = (id, at, title, body, ch, pre) => { if (at > from) list.push({ id, title, body, channelId: ch, pre: !!pre, schedule: { at, allowWhileIdle: true } }); };
+  const addT = (id, at, title, body, ch = 'plan') => { add(id, at, title, body, ch); if (pT > 0) add(id + 200, new Date(at.getTime() - pT * 6e4), `⏰ بعد ${pT} د: ${title}`, body, ch, 1); };
   const atT = (d, hh, mm) => { const x = new Date(d); x.setHours(hh, mm, 0, 0); return x; };
   for (let k = 0; k < 7; k++) {
     const d = addDays(now, k), di = dIdx(d), base = (k + 1) * 1000, pr = prayers(d), pp = p => pr.find(x => x[0] === p)[1], hd = hij(d), key = iso(d);
     if (N.pray) {
       ['الفجر', 'الظهر', 'العصر', 'المغرب', 'العشاء'].forEach((n, i) => {
         const t = pp(n); add(base + i, t, `🕌 حان وقت صلاة ${n}`, `${hm(t)} • ${hd}`, 'pray');
-        if (S.set.pre > 0) add(base + 10 + i, new Date(t.getTime() - S.set.pre * 6e4), `بعد ${S.set.pre} دقائق: صلاة ${n}`, hm(t), 'pray');
+        if (S.set.pre > 0) add(base + 10 + i, new Date(t.getTime() - S.set.pre * 6e4), `بعد ${S.set.pre} دقائق: صلاة ${n}`, hm(t), 'pray', 1);
       });
       add(base + 5, pp('الشروق'), '🌅 الشروق', 'انتهى وقت الفجر — الضحى بعد 15 دقيقة', 'plan');
     }
@@ -398,7 +399,7 @@ function buildList(back = 0) {
     }
     if (N.log) add(base + 40, atT(d, 21, 30), '✅ سجّل إنجاز اليوم', 'افتح خطتي وحدّد تم / جزئي / لم يتم', 'plan');
     if (N.acts !== false) dayActs(key).forEach((a, i) => { if (a.min == null || i > 99) return; addT(base + 100 + i, atT(d, Math.floor(a.min / 60), a.min % 60), '📌 ' + a.title, a.src === 'f' ? 'نشاط يومي ثابت' : 'نشاط اليوم'); });
-    if (N.ev) (S.ev[key] || []).forEach(e => { if (e.rem && e.tm) { const [h, m] = e.tm.split(':').map(Number), at = atT(d, h, m); evn++; add(50000 + evn, at, '📅 ' + e.t, hij(d), 'plan'); if (pT > 0) add(70000 + evn, new Date(at.getTime() - pT * 6e4), `⏰ بعد ${pT} د: 📅 ${e.t}`, hij(d), 'plan'); } });
+    if (N.ev) (S.ev[key] || []).forEach(e => { if (e.rem && e.tm) { const [h, m] = e.tm.split(':').map(Number), at = atT(d, h, m); evn++; add(50000 + evn, at, '📅 ' + e.t, hij(d), 'plan'); if (pT > 0) add(70000 + evn, new Date(at.getTime() - pT * 6e4), `⏰ بعد ${pT} د: 📅 ${e.t}`, hij(d), 'plan', 1); } });
   }
   list.sort((a, b) => a.schedule.at - b.schedule.at);
   return list.slice(0, 450);
@@ -411,7 +412,7 @@ function webTick() {
 }
 async function sched0(ask) {
   if (DESK()) {
-    try { const l = buildList(600000).map(n => ({ id: n.id, title: n.title, body: n.body, at: n.schedule.at.getTime() })); DESK().setList(l); NI.perm = 'granted'; S.set.scheduled = l.length; S.set.err = ''; } catch (e) { NI.perm = 'error'; S.set.err = String(e.message || e); }
+    try { const l = buildList(600000).map(n => ({ id: n.id, title: n.title, body: n.body, pre: n.pre, at: n.schedule.at.getTime() })); DESK().setList(l); try { DESK().setAlarm(S.set.alarm !== false); } catch (e) { } NI.perm = 'granted'; S.set.scheduled = l.length; S.set.err = ''; } catch (e) { NI.perm = 'error'; S.set.err = String(e.message || e); }
     save(); return;
   }
   if (!Capacitor.isNativePlatform()) {
@@ -426,7 +427,10 @@ async function sched0(ask) {
     try { await LocalNotifications.createChannel({ id: 'pray', name: 'مواقيت الصلاة', importance: 5, vibration: true, visibility: 1 }); await LocalNotifications.createChannel({ id: 'plan', name: 'الخطة والمفكرة', importance: 4, vibration: true, visibility: 1 }); } catch (e) { }
     const pend = await LocalNotifications.getPending(); if (pend.notifications.length) await LocalNotifications.cancel({ notifications: pend.notifications.map(x => ({ id: x.id })) });
     const list = buildList();
-    if (list.length) await LocalNotifications.schedule({ notifications: list });
+    const useAlarm = S.set.alarm !== false;
+    const al = useAlarm ? list.filter(x => !x.pre) : [], nn = useAlarm ? list.filter(x => x.pre) : list;
+    if (nn.length) await LocalNotifications.schedule({ notifications: nn.map(({ pre, ...x }) => x) });
+    try { await KhAlarm.set({ alarms: al.map(x => ({ id: x.id, at: x.schedule.at.getTime(), title: x.title, body: x.body })) }); } catch (e) { S.set.err = 'alarm: ' + (e.message || e); }
     S.set.scheduled = list.length; S.set.err = '';
     try { NI.exact = (await LocalNotifications.checkExactNotificationSetting()).exact_alarm; } catch (e) { }
   } catch (e) { S.set.err = String(e.message || e); }
@@ -436,6 +440,13 @@ let sq = Promise.resolve();
 const sched = ask => (sq = sq.then(() => sched0(ask)).catch(() => { }));
 async function nfix() {
   await sched(true);
+  if (Capacitor.isNativePlatform() && NI.perm === 'granted') {
+    try {
+      const st = await KhAlarm.status();
+      if (!st.battery) { toast('اختر «السماح» عشان الجوال ما يقفلش التنبيهات'); await KhAlarm.battery(); }
+      else if (!st.fullscreen) { toast('فعّل «عرض الإشعارات بملء الشاشة» لخطتي'); await KhAlarm.fullscreen(); }
+    } catch (e) { }
+  }
   if (NI.perm !== 'granted') toast(Capacitor.isNativePlatform() ? 'الإذن مرفوض — افتح إعدادات الجوال ← التطبيقات ← خطتي ← الإشعارات وفعّلها' : 'فعّل الإشعارات من إعدادات المتصفح للموقع');
   else toast('تم تفعيل التنبيهات ✔');
   render();
@@ -445,6 +456,7 @@ async function testNotif() {
   if (DESK()) { const ok = await DESK().test(title, body); toast(ok ? 'أُرسل تنبيه الآن — إن لم يظهر راجع «المساعد في التركيز» (Focus Assist) في ويندوز' : 'إشعارات ويندوز غير مدعومة على هذا الجهاز'); return; }
   if (Capacitor.isNativePlatform()) {
     await sched(true); if (NI.perm !== 'granted') return nfix();
+    if (S.set.alarm !== false) { try { await KhAlarm.test(); toast('هيرنّ الألارم بعد 5 ثوانٍ — اقفل الشاشة وانتظر'); return; } catch (e) { } }
     try { await LocalNotifications.schedule({ notifications: [{ id: 99999, title, body, channelId: 'plan', schedule: { at: new Date(Date.now() + 5000), allowWhileIdle: true } }] }); toast('سيصلك تنبيه بعد 5 ثوانٍ — اقفل الشاشة وانتظر'); } catch (e) { toast('تعذر الجدولة: ' + (e.message || e)); }
     return;
   }
@@ -452,7 +464,7 @@ async function testNotif() {
 }
 
 /* ---------- sync between devices (encrypted secret Gist) ---------- */
-const SYNC_SEC = ['track', 'books', 'series', 'weeks', 'batches', 'ev', 'acts', 'ad'], SYNC_SET = ['city', 'lat', 'lng', 'pre', 'preT', 'n', 'daily'];
+const SYNC_SEC = ['track', 'books', 'series', 'weeks', 'batches', 'ev', 'acts', 'ad'], SYNC_SET = ['city', 'lat', 'lng', 'pre', 'preT', 'n', 'daily', 'alarm'];
 const hs = x => { let h = 5381; for (let i = 0; i < x.length; i++) h = ((h << 5) + h + x.charCodeAt(i)) | 0; return h + ':' + x.length; };
 function flat() {
   const m = {};
@@ -563,6 +575,7 @@ function openSheet() {
 <select id="city">${Object.entries(CITIES).map(([k, v]) => `<option value="${k}"${S.set.city === k ? ' selected' : ''}>${v[0]}</option>`).join('')}${S.set.lat != null ? `<option value="gps"${S.set.city === 'gps' ? ' selected' : ''}>موقعي الحالي (GPS)</option>` : ''}</select>
 <button class="big s" id="gps">📡 استخدم موقعي الحالي</button>
 <b>🔔 التنبيهات</b>
+<label class="tg"><input type="checkbox" id="alm"${S.set.alarm !== false ? ' checked' : ''}> 🔔 صوت ألارم يرنّ حتى توقفه (بدل إشعار عادي)</label>
 ${[['pray', 'مواقيت الصلاة'], ['adhkar', 'الأذكار'], ['tasks', 'مهام الخطة اليومية'], ['log', 'تذكير تسجيل الإنجاز'], ['acts', 'أنشطتي اليومية'], ['ev', 'مواعيد المفكرة']].map(x => `<label class="tg"><input type="checkbox" data-n="${x[0]}"${(x[0] === 'acts' ? N.acts !== false : N[x[0]]) ? ' checked' : ''}> ${x[1]}</label>`).join('')}
 <label class="tg">تنبيه قبل الأذان: <select id="pre"><option value="0">بدون</option><option value="5">5 د</option><option value="10">10 د</option><option value="15">15 د</option><option value="20">20 د</option></select></label>
 <label class="tg">تنبيه قبل كل مهمة ونشاط: <select id="preT"><option value="0">بدون</option><option value="5">5 د</option><option value="10">10 د</option><option value="15">15 د</option><option value="30">30 د</option></select></label>
@@ -590,6 +603,7 @@ ${S.sync ? `<div class="sm">✅ مربوط — أي تغيير يظهر على �
   $('#cl').onclick = () => s.hidden = true;
   $('#city').onchange = e => { S.set.city = e.target.value; save(); render(); sched(); };
   $('#pre').onchange = e => { S.set.pre = +e.target.value; save(); sched(); };
+  $('#alm').onchange = e => { S.set.alarm = e.target.checked; save(); sched(); };
   $('#preT').onchange = e => { S.set.preT = +e.target.value; save(); sched(); };
   $('#tn').onclick = testNotif;
   s.querySelectorAll('[data-n]').forEach(c => c.onchange = () => { S.set.n[c.dataset.n] = c.checked; save(); sched(); });
