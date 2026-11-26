@@ -1,4 +1,5 @@
 import HERO from './hero.js';
+import { initSync } from './sync.js';
 import * as pdfjs from 'pdfjs-dist/build/pdf.min.mjs';
 import { PDFDocument, rgb, LineCapStyle } from 'pdf-lib';
 import workerText from './worker.js';
@@ -17,9 +18,14 @@ let uid = 0;
 const idb = () => new Promise((res, rej) => { const r = indexedDB.open('engpen', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 async function kvSet(k, v) { try { const db = await idb(); db.transaction('kv', 'readwrite').objectStore('kv').put(v, k); } catch (e) { } }
 async function kvGet(k) { try { const db = await idb(); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => r(q.result); q.onerror = () => r(null); }); } catch (e) { return null; } }
-let saveT; const autosave = () => { clearTimeout(saveT); saveT = setTimeout(persist, 900); };
+let DIRTY = false, READY = false;
+const snap = () => ({ orient: S.orient, panes: S.panes.map(p => ({ kind: p.kind, name: p.name, bytes: p.bytes || null, zoom: p.zoom, pages: p.pages.map(g => ({ w: g.w, h: g.h, strokes: g.strokes })) })) });
+const sy = initSync({ snapshot: snap, kvGet, kvSet, toast: m => toast(m) });
+let saveT; const autosave = () => { if (READY) { DIRTY = true; sy.touch(); } clearTimeout(saveT); saveT = setTimeout(persist, 900); };
 function persist() {
-  kvSet('state', { orient: S.orient, panes: S.panes.map(p => ({ kind: p.kind, name: p.name, bytes: p.bytes || null, zoom: p.zoom, pages: p.pages.map(g => ({ w: g.w, h: g.h, strokes: g.strokes })) })) });
+  if (sy.applying) return;
+  kvSet('state', snap());
+  if (DIRTY) { DIRTY = false; localStorage.ep_mt = String(Date.now()); sy.soon(); }
 }
 
 /* ---------- UI shell ---------- */
@@ -44,6 +50,7 @@ document.body.innerHTML = `
   <button data-a="fs"><b>⛶</b><small>ملء الشاشة</small></button>
   <button data-a="hide"><b>▲</b><small>إخفاء الأدوات</small></button>
   <button data-a="about"><b><img class="av" alt=""></b><small>الرئيسية</small></button>
+  <button data-a="sync"><b>🔗</b><small>مزامنة</small></button>
  </div></section>
 </div>
 <button id="showbar" data-a="show" hidden>▼ إظهار الأدوات</button>
@@ -387,6 +394,7 @@ document.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
   if (a === 'save') savePane(false);
   if (a === 'share') savePane(true);
   if (a === 'about') splash(false);
+  if (a === 'sync') sy.setup();
   if (a === 'hide') { $('#bar').classList.add('h'); $('#showbar').hidden = false; }
   if (a === 'show') { $('#bar').classList.remove('h'); $('#showbar').hidden = true; }
   if (a === 'orient') { S.orient = S.orient === 'column' ? 'row' : 'column'; layoutPanes(); autosave(); }
@@ -407,4 +415,5 @@ window.addEventListener('beforeunload', persist);
     }
     toast('تم استرجاع شغلك السابق');
   } else addPane('draft', 'مسودة', [{ w: A4[0], h: A4[1], strokes: [] }]);
+  setTimeout(() => { READY = true; }, 2000);
 })();

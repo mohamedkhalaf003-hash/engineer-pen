@@ -154,6 +154,7 @@ function actCard(key) {
 <textarea id="actd" rows="3" placeholder="6:30 ص مشي&#10;5:00 م اجتماع&#10;20:15 مكالمة">${esc((S.acts || {})[key] || '')}</textarea>
 <details><summary>🔁 أنشطة ثابتة تتكرر كل يوم</summary><textarea id="actf" rows="4" placeholder="9:00 ص أذكار&#10;10:00 م نوم">${esc(S.set.daily || '')}</textarea></details></div>`;
 }
+const syncBanner = () => (!S.sync ? `<button class="nb sb" data-nsync="1">🔗 اربط هذا الجهاز بالجهاز الآخر لتتطابق بياناتك تلقائيًا</button>` : '');
 const notifBanner = () => (NI.perm && NI.perm !== 'granted' && NI.perm !== 'unsupported') ? `<button class="nb" data-nfix="1">🔕 التنبيهات غير مفعّلة — اضغط هنا لتفعيلها</button>` : '';
 
 function vToday() {
@@ -164,7 +165,7 @@ function vToday() {
   return `
 <div class="dn"><button data-nav="-1">‹</button><div><b>${DAYS[di]}</b><small>${fmt(d)}${isToday ? ' • اليوم' : ''}</small></div><button data-nav="1">›</button></div>
 ${isToday ? '' : '<button class="tdy" data-nav="0">العودة لليوم</button>'}
-${notifBanner()}
+${notifBanner()}${syncBanner()}
 <div class="ban"><img src="hero.jpg" alt=""><div class="ov"><div class="dl"><b>${hij(d)}</b><span>${fmt(d)} ${d.getFullYear()} م</span></div><div class="nx" id="nx">${isToday ? nextTxt() : ''}</div></div></div>
 <div class="card pr"><div class="pg">${prayers(d).map(x => `<div class="${x[0] === 'الشروق' ? 'sr' : ''}"><small>${x[0]}</small><b>${hm(x[1])}</b></div>`).join('')}</div><small class="pc">📍 ${place()[0]}</small></div>
 <div class="card hero"><div class="ring ${rcls(pct)}" style="--p:${pct}"><span>${pct}%</span></div>
@@ -320,6 +321,7 @@ document.addEventListener('click', e => {
   if (t.dataset.evdel) { S.ev[cur] = (S.ev[cur] || []).filter(e => e.id !== t.dataset.evdel); save(); render(); sched(); return; }
   if (t.dataset.ad !== undefined) { const a = dayActs(cur)[+t.dataset.ad]; if (a) { const k = actKey(cur, a); S.ad[k] = !S.ad[k]; save(); $('#actl').innerHTML = actListHTML(cur); } return; }
   if (t.dataset.nfix) { nfix(); return; }
+  if (t.dataset.nsync) { openSheet(); return; }
   if (t.dataset.rep) { if (!monthStats(cm.y, cm.m).cnt) { toast('لا توجد أيام في هذا الشهر بعد'); return; } out('khotati-report-' + cm.y + '-' + String(cm.m + 1).padStart(2, '0') + '.html', reportHTML(cm.y, cm.m), 'text/html'); return; }
   if (t.dataset.go) { cur = t.dataset.go; tab = 'today'; $('#view').scrollTop = 0; render(); return; }
   if (t.dataset.sr !== undefined) { const i = t.dataset.sr; S.series[i] = Math.max(0, (S.series[i] || 0) + +t.dataset.d); save(); render(); return; }
@@ -510,7 +512,8 @@ async function syncNow(first) {
   if (SY.busy) { SY.again = true; return; }
   SY.busy = true; SY.err = '';
   try {
-    if (!sy.gid) { const L = await gh('/gists?per_page=100', sy.token); const g = L.find(x => x.description === 'khotati-sync' && x.files && x.files[FN]); if (g) sy.gid = g.id; }
+    const findG = async () => (await gh('/gists?per_page=100', sy.token)).filter(x => x.description === 'khotati-sync' && x.files && x.files[FN]).sort((a, b) => (a.created_at < b.created_at ? -1 : 1))[0];
+    if (!sy.gid) { const g = await findG(); if (g) sy.gid = g.id; }
     let remote = null;
     if (sy.gid) {
       const g = await gh('/gists/' + sy.gid, sy.token); let f = g.files[FN];
@@ -528,7 +531,7 @@ async function syncNow(first) {
     }
     if (need) {
       const content = await enc({ v: 1, items }, sy.token);
-      if (!sy.gid) { const g = await gh('/gists', sy.token, { method: 'POST', body: JSON.stringify({ description: 'khotati-sync', public: false, files: { [FN]: { content } } }) }); sy.gid = g.id; }
+      if (!sy.gid) { const g = await gh('/gists', sy.token, { method: 'POST', body: JSON.stringify({ description: 'khotati-sync', public: false, files: { [FN]: { content } } }) }); sy.gid = g.id; const g2 = await findG(); if (g2 && g2.id !== g.id) { sy.gid = g2.id; try { await fetch(GH + '/gists/' + g.id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + sy.token } }); } catch (e) { } SY.again = true; } }
       else await gh('/gists/' + sy.gid, sy.token, { method: 'PATCH', body: JSON.stringify({ files: { [FN]: { content } } }) });
     }
     SY.last = Date.now(); persist();
@@ -571,7 +574,7 @@ ${Capacitor.isNativePlatform() ? '<div class="sm">لو التنبيهات تتأ
 <button class="big" id="xl">📊 إضافة / تحديث ملف الإكسل (xlsx)</button>
 <div class="sm">${S.xl ? 'آخر ملف: ' + esc(S.xl.name) + ' — ' + esc(new Date(S.xl.at).toLocaleDateString(LOC)) + '<br>' : ''}اختر ملف الخطة المحدّث في أي وقت: يتحدّث الجدول الأسبوعي والكتب والمحتوى والجدول الزمني تلقائيًا، وبياناتك ومتابعتك لا تُمسح.</div>
 <b>🔗 الربط بين الجوال والكمبيوتر</b>
-${S.sync ? `<div class="sm">✅ مربوط — أي تغيير يظهر على الجهاز الآخر تلقائيًا${SY.last ? ' • آخر مزامنة ' + hm(new Date(SY.last)) : ''}${SY.err ? '<br>⚠️ ' + esc(SY.err) : ''}</div><button class="big s" id="sy">🔄 مزامنة الآن</button><button class="big s" id="su">فك الربط عن هذا الجهاز</button>` : `<div class="sm">خطوة واحدة على كل جهاز: ١) اضغط الزر الأول لإنشاء مفتاح (اختر «No expiration» وتأكد أن «gist» فقط مفعّل) ٢) انسخ المفتاح والصقه هنا ٣) اضغط ربط. استخدم <b>نفس المفتاح</b> على الجهازين. البيانات مشفّرة قبل رفعها.</div><button class="big s" id="sk">🔑 صفحة إنشاء المفتاح</button><input id="st" class="bn" placeholder="الصق المفتاح هنا (ghp_…)" autocomplete="off" spellcheck="false"><button class="big" id="sl">🔗 ربط هذا الجهاز</button>`}
+${S.sync ? `<div class="sm">✅ مربوط — أي تغيير يظهر على الجهاز الآخر تلقائيًا${SY.last ? ' • آخر مزامنة ' + hm(new Date(SY.last)) : ''}${SY.err ? '<br>⚠️ ' + esc(SY.err) : ''}</div><button class="big s" id="sy">🔄 مزامنة الآن</button><button class="big s" id="su">فك الربط عن هذا الجهاز</button>` : `<div class="sm">خطوة واحدة على كل جهاز: ١) اضغط الزر الأول لإنشاء مفتاح (اختر «No expiration» وتأكد أن «gist» فقط مفعّل) ٢) انسخ المفتاح والصقه هنا ٣) اضغط ربط. استخدم <b>نفس المفتاح</b> على الجهازين. البيانات مشفّرة قبل رفعها.</div><button class="big s" id="sk">🔑 صفحة إنشاء المفتاح</button><input id="st" class="bn" placeholder="الصق المفتاح هنا (ghp_…)" autocomplete="off" spellcheck="false"><button class="big s" id="sp">📋 لصق من الحافظة</button><button class="big" id="sl">🔗 ربط هذا الجهاز</button>`}
 <b>🔄 التحديث</b>
 <button class="big s" id="up">⬇️ البحث عن نسخة جديدة (يحتاج إنترنت)</button>
 <button class="big s" id="ip">📋 استيراد ملف الخطة المحدّثة (plan.json)</button>
@@ -597,6 +600,7 @@ ${S.sync ? `<div class="sm">✅ مربوط — أي تغيير يظهر على �
   $('#fx').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const { data, found } = parseWorkbook(new Uint8Array(await f.arrayBuffer()), D); S.custom = data; S.xl = { name: f.name, at: Date.now() }; save(); toast('تم تحديث الخطة من: ' + found.join('، ')); setTimeout(() => location.reload(), 1000); } catch (x) { toast('تعذر قراءة الملف: ' + (x.message || x)); } };
   const openUrl = u => Capacitor.isNativePlatform() ? Browser.open({ url: u }) : window.open(u, '_blank');
   if ($('#sk')) { $('#sk').onclick = () => openUrl('https://github.com/settings/tokens/new?scopes=gist&description=khotati-sync');
+    $('#sp').onclick = async () => { try { $('#st').value = (await navigator.clipboard.readText()).trim(); } catch (e) { toast('اضغط مطولًا داخل الخانة واختر لصق'); $('#st').focus(); } };
     $('#sl').onclick = async () => { const tk = $('#st').value.trim(); if (!tk) { toast('الصق المفتاح أولًا'); return; } S.sync = { token: tk }; persist(); toast('جارٍ الربط…'); await syncNow(true); if (SY.err) { const er = SY.err; delete S.sync; persist(); toast(er); } else toast('تم الربط ✔'); openSheet(); }; }
   if ($('#sy')) { $('#sy').onclick = async () => { toast('جارٍ المزامنة…'); await syncNow(); toast(SY.err || 'تمت المزامنة ✔'); openSheet(); }; $('#su').onclick = () => { if (confirm('فك الربط عن هذا الجهاز؟ بياناتك تبقى عليه.')) { delete S.sync; delete S.mt; delete S.sh; persist(); openSheet(); } }; }
   $('#ep').onclick = () => out('khotati-plan-' + stamp() + '.json', JSON.stringify(D), 'application/json');
