@@ -53,6 +53,8 @@ jobs:
         run: |
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > ks.jks; PASS="$KS_PASS"
+          elif [ -f "$GITHUB_WORKSPACE/signing/release.jks" ]; then
+            cp "$GITHUB_WORKSPACE/signing/release.jks" ks.jks; PASS="d58e0c05877aa6758d91216e"
           else
             PASS=$(openssl rand -hex 12)
             keytool -genkeypair -keystore ks.jks -alias pen -keyalg RSA -keysize 2048 -validity 12000 -storepass "$PASS" -keypass "$PASS" -dname "CN=Khotati Plan, O=Personal"
