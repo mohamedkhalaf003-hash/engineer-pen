@@ -39,7 +39,7 @@ for (const k of ['track', 'books', 'series', 'weeks', 'batches']) S[k] = S[k] ||
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } };
 function save() { if (S.sync) stamp0(); persist(); syncSoon(); }
 
-for (const k of ['ev', 'acts', 'ad']) S[k] = S[k] || {};
+for (const k of ['ev', 'acts', 'ad', 'work']) S[k] = S[k] || {};
 S.set = Object.assign({ city: 'riyadh', pre: 10, preT: 10, daily: '', n: { pray: true, tasks: true, adhkar: true, ev: true, log: true } }, S.set || {});
 const D = (S.custom && S.custom.books && S.custom.weeks) ? S.custom : DATA0;
 let PLAN = D.plan || DATA0.plan;
@@ -88,6 +88,7 @@ document.body.innerHTML = `
 <main id="view"></main>
 <nav id="nav">
  <button data-tab="today"><i>✅</i>اليوم</button>
+ <button data-tab="work"><i>💼</i>الشغل</button>
  <button data-tab="week"><i>📊</i>الأسبوع</button>
  <button data-tab="books"><i>📚</i>الكتب</button>
  <button data-tab="content"><i>✍️</i>المحتوى</button>
@@ -157,6 +158,68 @@ function actCard(key) {
 const syncBanner = () => (!S.sync ? `<button class="nb sb" data-nsync="1">🔗 اربط هذا الجهاز بالجهاز الآخر لتتطابق بياناتك تلقائيًا</button>` : '');
 const notifBanner = () => (NI.perm && NI.perm !== 'granted' && NI.perm !== 'unsupported') ? `<button class="nb" data-nfix="1">🔕 التنبيهات غير مفعّلة — اضغط هنا لتفعيلها</button>` : '';
 
+/* ---------- شغل اليوم (المتغير اليومي) ---------- */
+const WPROJ = ['بنيان نجد', 'الصندوق', 'موان', 'اشبيلية', 'تلال الوصيل', 'مدن', 'مستودع السلى', 'فيلا عوض', 'مسجد حريملاء', 'فيلا الكنانى'];
+const nz = s => String(s || '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/[ًٌٍَُِّْ]/g, '').toLowerCase();
+const wid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function parseWork(txt) {
+  const out = [];
+  for (const raw of normD(txt).split(/\n|؛|;/)) {
+    let line = raw.trim().replace(/^[\-–—•*·\d]+[.)\-–]\s*/, '').replace(/^[\-–—•*·]\s*/, ''); if (!line) continue;
+    let pri = 0; if (/(^|\s)!+(\s|$)/.test(line) || /(^|\s)(عاجل|مهم|ضروري)(\s|$)/.test(line)) { pri = 1; line = line.replace(/(^|\s)!+(?=\s|$)/g, ' ').replace(/(^|\s)(عاجل|مهم|ضروري)(?=\s|$)/g, ' ').trim(); }
+    const a = parseActs(line)[0]; let min = a && a.min != null ? a.min : null, t = a ? a.title : line;
+    let proj = ''; const pm = t.match(/^([^:：]{2,28})[:：]\s*(.+)$/);
+    if (pm) { proj = pm[1].trim(); t = pm[2].trim(); }
+    const nt = nz(proj + ' ' + t); for (const n of WPROJ) if (nt.includes(nz(n))) { if (!proj) proj = n; else if (nz(proj) !== nz(n) && nz(proj).includes(nz(n))) proj = n; break; }
+    if (!t) continue; out.push({ id: wid(), t: t.slice(0, 300), min, proj, pri, done: false });
+  }
+  return out;
+}
+const wList = key => S.work[key] || [];
+const wSort = L => [...L].sort((a, b) => (a.min == null) - (b.min == null) || (a.min ?? 0) - (b.min ?? 0) || (b.pri || 0) - (a.pri || 0));
+function carryList(key) {
+  const out = []; for (let i = 1; i <= 7; i++) { const k = iso(addDays(parse(key), -i)); wList(k).forEach(w => { if (!w.done && !w.mv) out.push({ ...w, from: k }); }); } return out;
+}
+function workMini(key) {
+  const L = wList(key), dn = L.filter(w => w.done).length;
+  return `<div class="card wm"><div class="ih"><span class="ic">💼</span><div><b>شغل اليوم</b><small>${L.length ? `${dn} من ${L.length} خلصت` : 'لسه ما أضفتش شغل اليوم'}</small></div></div><button class="nb" data-tab="work" style="margin-top:8px">${L.length ? 'افتح شغل اليوم' : '➕ أضف شغل اليوم'}</button></div>`;
+}
+function workItem(w) {
+  return `<div class="ar wi${w.done ? ' dn2' : ''}"><button class="ak" data-wd="${w.id}">${w.done ? '✔' : '○'}</button><div class="wb"><span>${w.pri ? '‼ ' : ''}${esc(w.t)}</span>${w.proj ? `<em class="wp">${esc(w.proj)}</em>` : ''}</div>${w.min != null ? `<b>${fmMin(w.min)}</b>` : ''}<button class="wx" data-we="${w.id}" title="تعديل">✎</button><button class="wx" data-wx="${w.id}" title="حذف">✕</button></div>`;
+}
+function vWork() {
+  const d = parse(cur), di = dIdx(d), isToday = cur === iso(new Date()), L = wSort(wList(cur)), dn = L.filter(w => w.done).length, carry = carryList(cur);
+  const timed = L.filter(w => w.min != null), un = L.filter(w => w.min == null), pct = L.length ? Math.round(dn * 100 / L.length) : 0;
+  const byP = {}; un.forEach(w => { (byP[w.proj || 'عام'] = byP[w.proj || 'عام'] || []).push(w); });
+  return `
+<div class="dn"><button data-nav="-1">‹</button><div><b>${DAYS[di]}</b><small>${fmt(d)}${isToday ? ' • اليوم' : ''}</small></div><button data-nav="1">›</button></div>
+${isToday ? '' : '<button class="tdy" data-nav="0">العودة لليوم</button>'}
+<div class="card hero"><div class="ring ${L.length ? rcls(pct) : ''}" style="--p:${pct}"><span>${pct}%</span></div><div><b>💼 شغل اليوم</b><div class="sm">${L.length ? `${dn} من ${L.length} خلصت` : 'اكتب شغل اليوم تحت وهيترتّب'}</div></div></div>
+<div class="card"><b>➕ أضف شغل اليوم</b>
+<textarea id="wtxt" rows="5" placeholder="سطر لكل بند. مثال:&#10;8:00 ص مدن: مراجعة طلب اعتماد مواد&#10;بنيان نجد: رد على استفسار المقاول !&#10;10:30 اجتماع موقع الصندوق&#10;مراجعة مخطط فيلا عوض"></textarea>
+<div class="sm">الوقت أولًا (اختياري) • اسم المشروع بيتعرف لوحده أو اكتبه قبل نقطتين • «!» أو «عاجل» يرفعه لفوق • تقدر تلصق من واتساب أو من هنا.</div>
+<button class="nb" data-wadd="1">رتّب وأضف</button></div>
+${carry.length ? `<div class="card wc"><b>↪ شغل مرحّل (لسه ما خلصش)</b>${carry.map(w => `<div class="ar"><div class="wb"><span>${esc(w.t)}</span>${w.proj ? `<em class="wp">${esc(w.proj)}</em>` : ''}<small>من ${fmt(parse(w.from))}</small></div><button class="nb" data-wc="${w.from}|${w.id}">نقل لليوم</button></div>`).join('')}<button class="nb" data-wc="all">نقل الكل لليوم</button></div>` : ''}
+${timed.length ? `<div class="card"><b>⏰ بمواعيد</b>${timed.map(workItem).join('')}</div>` : ''}
+${Object.keys(byP).map(p => `<div class="card"><b>📋 ${esc(p)}</b>${byP[p].map(workItem).join('')}</div>`).join('')}
+${L.length ? `<div class="card"><button class="nb" data-wcopy="1">📋 نسخ ملخص اليوم</button>${dn ? '<button class="nb" data-wclr="1">🧹 مسح اللي خلص</button>' : ''}</div>` : ''}`;
+}
+function workSummary(key) {
+  const L = wSort(wList(key)); if (!L.length) return '';
+  return `💼 شغل ${fmt(parse(key))}\n` + L.map(w => `${w.done ? '✔' : '○'} ${w.min != null ? fmMin(w.min) + ' ' : ''}${w.proj ? w.proj + ': ' : ''}${w.t}${w.pri ? ' ‼' : ''}`).join('\n');
+}
+function workClick(t) {
+  const d = t.dataset;
+  if (t.hasAttribute('data-wadd')) { const ta = $('#wtxt'), L = parseWork(ta.value); if (!L.length) { toast('اكتب شغل اليوم الأول'); return true; } S.work[cur] = (S.work[cur] || []).concat(L); save(); render(); sched(); toast('✔ اتضاف ' + L.length + ' بند'); return true; }
+  if (d.wd) { const w = wList(cur).find(x => x.id === d.wd); if (w) { w.done = !w.done; save(); render(); } return true; }
+  if (d.wx) { S.work[cur] = wList(cur).filter(x => x.id !== d.wx); if (!S.work[cur].length) delete S.work[cur]; save(); render(); sched(); return true; }
+  if (d.we) { const w = wList(cur).find(x => x.id === d.we); if (w) { S.work[cur] = wList(cur).filter(x => x.id !== d.we); if (!S.work[cur].length) delete S.work[cur]; save(); render(); const ta = $('#wtxt'); ta.value = (w.min != null ? fmMin(w.min) + ' ' : '') + (w.proj ? w.proj + ': ' : '') + w.t + (w.pri ? ' !' : ''); ta.focus(); } return true; }
+  if (d.wc) { const items = d.wc === 'all' ? carryList(cur) : carryList(cur).filter(x => d.wc === x.from + '|' + x.id); items.forEach(x => { const src = wList(x.from).find(w => w.id === x.id); if (src) src.mv = true; (S.work[cur] = S.work[cur] || []).push({ id: wid(), t: x.t, min: null, proj: x.proj, pri: x.pri, done: false }); }); save(); render(); sched(); return true; }
+  if (t.hasAttribute('data-wclr')) { S.work[cur] = wList(cur).filter(x => !x.done); if (!S.work[cur].length) delete S.work[cur]; save(); render(); return true; }
+  if (t.hasAttribute('data-wcopy')) { const tx = workSummary(cur); (navigator.clipboard ? navigator.clipboard.writeText(tx).then(() => toast('✔ اتنسخ')) : Promise.reject()).catch(() => out('khotati-work-' + cur + '.txt', tx, 'text/plain')); return true; }
+  return false;
+}
+
 function vToday() {
   const d = parse(cur), di = dIdx(d), p = PLAN[di], t = S.track[cur] || { s: {}, n: '' };
   const pct = dayPct(cur), y = iso(addDays(d, -1)), yp = dayPct(y);
@@ -171,6 +234,7 @@ ${notifBanner()}${syncBanner()}
 <div class="card hero"><div class="ring ${rcls(pct)}" style="--p:${pct}"><span>${pct}%</span></div>
  <div><b>إنجاز اليوم</b><div class="sm">${rate(pct)}</div><div class="sm">8:30 ص — مراجعة إنجاز أمس: <b>${yp}%</b></div></div></div>
 ${sites.length ? `<div class="card sites">${sites.join('<br>')}</div>` : ''}
+${workMini(cur)}
 ${actCard(cur)}
 ${ITEMS.map(it => {
     if (isNA(it.k, di)) return `<div class="card it na"><div class="ih"><span class="ic">${it.ic}</span><div><b>${it.t}</b><small>غير مطلوب اليوم</small></div></div></div>`;
@@ -302,7 +366,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid 
 
 function render() {
   const v = $('#view'), top = v.scrollTop;
-  v.innerHTML = { today: vToday, week: vWeek, books: vBooks, content: vContent, cal: vCal, plan: vPlan }[tab]();
+  v.innerHTML = { today: vToday, work: vWork, week: vWeek, books: vBooks, content: vContent, cal: vCal, plan: vPlan }[tab]();
   v.scrollTop = top;
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#sub').textContent = fmt(new Date()) + ' • ' + hij(new Date());
@@ -311,6 +375,7 @@ function render() {
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
   const t = e.target.closest('button'); if (!t) return;
+  if (workClick(t)) return;
   if (t.dataset.tab) { tab = t.dataset.tab; $('#view').scrollTop = 0; render(); return; }
   if (t.id === 'gear') { openSheet(); return; }
   if (t.dataset.nav !== undefined) { cur = t.dataset.nav === '0' ? iso(new Date()) : iso(addDays(parse(cur), +t.dataset.nav)); $('#view').scrollTop = 0; render(); return; }
@@ -398,6 +463,7 @@ function buildList(back = 0) {
       addT(base + 42, atT(d, 22, 0), '🕌 النوافل والقيام', '4 قيام + 10 متفرقة (والرواتب 12)');
     }
     if (N.log) add(base + 40, atT(d, 21, 30), '✅ سجّل إنجاز اليوم', 'افتح خطتي وحدّد تم / جزئي / لم يتم', 'plan');
+    if (N.acts !== false) wList(key).forEach((w, i) => { if (w.min == null || w.done || i > 60) return; addT(base + 500 + i, atT(d, Math.floor(w.min / 60), w.min % 60), '💼 ' + w.t, w.proj || 'شغل اليوم'); });
     if (N.acts !== false) dayActs(key).forEach((a, i) => { if (a.min == null || i > 99) return; addT(base + 100 + i, atT(d, Math.floor(a.min / 60), a.min % 60), '📌 ' + a.title, a.src === 'f' ? 'نشاط يومي ثابت' : 'نشاط اليوم'); });
     if (N.ev) (S.ev[key] || []).forEach(e => { if (e.rem && e.tm) { const [h, m] = e.tm.split(':').map(Number), at = atT(d, h, m); evn++; add(50000 + evn, at, '📅 ' + e.t, hij(d), 'plan'); if (pT > 0) add(70000 + evn, new Date(at.getTime() - pT * 6e4), `⏰ بعد ${pT} د: 📅 ${e.t}`, hij(d), 'plan', 1); } });
   }
@@ -464,7 +530,7 @@ async function testNotif() {
 }
 
 /* ---------- sync between devices (encrypted secret Gist) ---------- */
-const SYNC_SEC = ['track', 'books', 'series', 'weeks', 'batches', 'ev', 'acts', 'ad'], SYNC_SET = ['city', 'lat', 'lng', 'pre', 'preT', 'n', 'daily', 'alarm'];
+const SYNC_SEC = ['track', 'books', 'series', 'weeks', 'batches', 'ev', 'acts', 'ad', 'work'], SYNC_SET = ['city', 'lat', 'lng', 'pre', 'preT', 'n', 'daily', 'alarm'];
 const hs = x => { let h = 5381; for (let i = 0; i < x.length; i++) h = ((h << 5) + h + x.charCodeAt(i)) | 0; return h + ':' + x.length; };
 function flat() {
   const m = {};
